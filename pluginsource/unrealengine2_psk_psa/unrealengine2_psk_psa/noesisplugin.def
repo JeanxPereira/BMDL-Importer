@@ -1,0 +1,6 @@
+LIBRARY unrealengine2_psk_psa
+EXPORTS
+	NPAPI_Init
+	NPAPI_Shutdown
+	NPAPI_GetPluginVer
+	NPAPI_GetPluginInfo
