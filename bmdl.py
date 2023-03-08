@@ -1,13 +1,10 @@
 bl_info = {
     "name": "Darkspore BMDL Importer",
-    "author": "Emd4600 & Jean Pereira",
-    "version": (0, 0, 1),
+    "author": "Emd4600",
     "blender": (2, 80, 0),
-    "location": "File > Import > BMDL",
+    "version": (0, 0, 1),
+    "location": "File > Import-Export",
     "description": "Import Darkspore .bmdl model format.",
-    "warning": "",
-    "doc_url": "",
-    "tracker_url": "",
     "category": "Import-Export"
 }
 
@@ -26,10 +23,8 @@ bl_info = {
 import os
 import bpy
 import struct
-from bpy.ops.import_scene.bmdl import *
-from bpy_extras.io_utils import unpack_face_list
 from bpy_extras.io_utils import ImportHelper
-
+from bpy_extras.io_utils import unpack_face_list
 
 
 def readByte(file, endian='<'):
@@ -300,8 +295,8 @@ def importBMDL(file):
     m = bpy.data.meshes.new(sections["shader"].name)
     obj = bpy.data.objects.new(sections["shader"].name, m)
 
-    bpy.context.scene.objects.link(obj)
-    bpy.context.scene.objects.active = obj
+    bpy.context.scene.collection.objects.link(obj)
+    bpy.context.view_layer.objects.active = obj
 
     # Add vertices
     m.vertices.add(sections["meshInfo"].vertexCount)
@@ -309,8 +304,8 @@ def importBMDL(file):
         m.vertices[v].co = vertex.pos
 
     # Add triangles
-    m.tessfaces.add(sections["meshInfo"].triangleCount)
-    m.tessfaces.foreach_set("vertices_raw", unpack_face_list(triangles))
+    m.polygons.add(sections["meshInfo"].triangleCount)
+    m.polygons.foreach_set("vertices_raw", unpack_face_list(triangles))
 
     uvTex = m.tessface_uv_textures.new()
     uvTex.name = "DefaultUV"
@@ -625,17 +620,18 @@ class BMDLVertexFormat:
 class ImportBMDL(bpy.types.Operator, ImportHelper):
     bl_idname = "import_my_format.bmdl"
     bl_label = "Import BMDL"
+
     filename_ext = ".bmdl"
-    filter_glob: bpy.props.StringProperty(default="*.bmdl", options={'HIDDEN'})
+    filter_glob = bpy.props.StringProperty(default="*.bmdl", options={'HIDDEN'})
 
     def execute(self, context):
-        filepath = self.filepath
-        with open(filepath, 'rb') as f:
-            result = {'CANCELLED'}
-            try:
-                result = importBMDL(f)
-            finally:
-                f.close()
+        file = open(self.filepath, 'br')
+        result = {'CANCELLED'}
+        try:
+            result = importBMDL(file)
+        finally:
+            file.close()
+
         return result
 
 
@@ -645,10 +641,13 @@ def bmdlImporter_menu_func(self, context):
 
 def register():
     bpy.utils.register_class(ImportBMDL)
+    bpy.types.TOPBAR_MT_file_import.append(bmdlImporter_menu_func)
 
 
 def unregister():
     bpy.utils.unregister_class(ImportBMDL)
+    bpy.types.TOPBAR_MT_file_import.remove(bmdlImporter_menu_func)
+
 
 if __name__ == "__main__":
     register()
