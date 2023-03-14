@@ -5,7 +5,8 @@ bl_info = {
     "version": (0, 0, 1),
     "location": "File > Import-Export",
     "description": "Import Darkspore .bmdl model format.",
-    "category": "Import-Export"
+    "category": "Import-Export",
+    "bl_icon": "darkspore.png"
 }
 
 # Important!
@@ -649,6 +650,8 @@ def bmdlImporter_menu_func(self, context):
 def register():
     bpy.utils.register_class(ImportBMDL)
     bpy.types.TOPBAR_MT_file_import.append(bmdlImporter_menu_func)
+    filter_glob: bpy.props.StringProperty(default="*.bmdl", options={'HIDDEN'})
+
 
 
 def unregister():
