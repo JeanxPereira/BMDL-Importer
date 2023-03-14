@@ -304,28 +304,28 @@ def importBMDL(file):
         m.vertices[v].co = vertex.pos
 
     # Add triangles
-    m.polygons.add(sections["meshInfo"].triangleCount)
+    m.polygons.add(len(triangles) // 3)
     m.polygons.foreach_set("vertices", unpack_face_list(triangles))
 
-    uvTex = m.tessface_uv_textures.new()
+    uvTex = m.uv_layers.new(name="DefaultUV")
     uvTex.name = "DefaultUV"
 
-    for f, face in enumerate(m.tessfaces):
-        uvTex.data[f].uv1 = vertices[face.vertices_raw[0]].uv
-        uvTex.data[f].uv2 = vertices[face.vertices_raw[1]].uv
-        uvTex.data[f].uv3 = vertices[face.vertices_raw[2]].uv
-        uvTex.data[f].uv4 = [0, 0]
+    for f, face in enumerate(m.polygons):
+        loop_indices = face.loop_indices
+        for li, vi in enumerate(loop_indices):
+            vidx = m.polygons[face.index].vertices[li]
+            uvTex.data[vi].uv = vertices[vidx].uv
 
     if BMDLVertex.readColor in vertexFormat.fmt:
         colorLayer = m.vertex_colors.new("Col")
 
         m.update()
 
-        for t in range(0, sections["meshInfo"].triangleCount):
-            for i in range(0, 3):
-                colorLayer.data[t*3 + i].color = BMDLVertex.decodeColor(vertices[triangles[t][i]].color)
+    for t in range(0, sections["meshInfo"].triangleCount):
+        for i in range(0, 3):
+            colorLayer.data[t*3 + i].color = BMDLVertex.decodeColor(vertices[triangles[t][i]].color)
 
-    m.update(calc_tessface=True)
+    m.update(calc_edges=True)
 
     for mesh in meshes:
         material = bpy.data.materials.new(mesh["objectInfo"].name)
@@ -337,7 +337,7 @@ def importBMDL(file):
         material.specular_color = specularColor.values if specularColor is not None else (1, 1, 1)
         material.specular_shader = 'COOKTORR'
         material.specular_intensity = 0.5
-        material.alpha = 1
+        material.blend_method = 'BLEND'  # set alpha blend mode
         ambient = BMDLShaderParamFloat.getParameter(mesh["shaderFloatParams"], "AmbiLevel")
         material.ambient = ambient.values[0] if ambient is not None else 1
 
@@ -358,9 +358,15 @@ def importBMDL(file):
         print(range(mesh["firstIndex"]//3, mesh["firstIndex"]//3 + mesh["indicesCount"]//3))
         for t in range(mesh["firstIndex"]//3, mesh["firstIndex"]//3 + mesh["indicesCount"]//3):
             # print(bpy.data.materials.find(mesh["material"].name))
-            m.polygons[t].material_index = m.materials.find(mesh["material"].name)
+            m.polygons[t].material_index = bpy.data.materials.find(mesh["material"].name)
 
-    m.update(calc_tessface=True)
+    # Add UV coordinates
+    uv_layer = m.uv_layers.new(name="DefaultUV")
+    for f, face in enumerate(m.polygons):
+        for i, index in enumerate(face.vertices):
+            uv_layer.data[f].uv[i] = vertices[triangles[f][i]].uv
+
+    m.update()
 
     return {'FINISHED'}
 
