@@ -304,9 +304,8 @@ def importBMDL(file):
         m.vertices[v].co = vertex.pos
 
     # Add triangles
-    m.polygons.add(len(triangles) // 3)
-    m.polygons.foreach_set("normal", [n for l in normals for n in l])
-    m.update()  # Update mesh to recalculate normals and other attributes
+    m.tessfaces.add(sections["meshInfo"].triangleCount)
+    m.tessfaces.foreach_set("vertices_raw", unpack_face_list(triangles))
 
 
     uvTex = m.uv_layers.new(name="DefaultUV")
