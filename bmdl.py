@@ -296,7 +296,7 @@ def importBMDL(file):
     m = bpy.data.meshes.new(sections["shader"].name)
     obj = bpy.data.objects.new(sections["shader"].name, m)
 
-    bpy.context.scene.collection.objects.link(obj)
+    bpy.context.collection.objects.link(obj)
     bpy.context.view_layer.objects.active = obj
 
     # Add vertices
@@ -304,9 +304,28 @@ def importBMDL(file):
     for v, vertex in enumerate(vertices):
         m.vertices[v].co = vertex.pos
 
-    # Add triangles
-    m.tessfaces.add(sections["meshInfo"].triangleCount)
-    m.tessfaces.foreach_set("vertices_raw", unpack_face_list(triangles))
+    # loop over each vertex and add to mesh
+    m = bpy.data.meshes.new(meshName)
+    m.from_pydata(vertexList, [], faceList)
+
+    # assign uv coordinates to mesh
+    uv_layer = m.uv_layers.new()
+    for face in m.polygons:
+        for i in range(face.loop_total):
+            loop_index = face.loop_start + i
+            uv_layer.data[loop_index].uv = uvList[face.vertices[i]]
+
+    # apply materials to mesh
+    for matIndex, faceCount in materialFaceCounts.items():
+        m.materials.append(materials[matIndex])
+        for i in range(faceCount):
+            faceStart = sum(materialFaceCounts.values()[:matIndex]) + i
+            m.polygons[faceStart].material_index = matIndex
+
+    obj = bpy.data.objects.new(meshName, m)
+    bpy.context.collection.objects.link(obj)
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
 
 
     uvTex = m.uv_layers.new(name="DefaultUV")
@@ -319,24 +338,24 @@ def importBMDL(file):
             uvTex.data[vi].uv = vertices[vidx].uv
 
     if BMDLVertex.readColor in vertexFormat.fmt:
-        colorLayer = m.vertex_colors.new("Col")
+        colorLayer = m.vertex_colors.new(name="Col")
 
         m.update()
 
     for t in range(0, sections["meshInfo"].triangleCount):
         for i in range(0, 3):
-            colorLayer.data[t*3 + i].color = BMDLVertex.decodeColor(vertices[triangles[t][i]].color)
+            colorLayer.data[t*3 + i].color = (BMDLVertex.decodeColor(vertices[triangles[t][i]].color), 1.0)
 
     m.update(calc_edges=True)
 
     for mesh in meshes:
         material = bpy.data.materials.new(mesh["objectInfo"].name)
         diffuseColor = BMDLShaderParamFloat.getParameter(mesh["shaderFloatParams"], "DiffuseTint")
-        material.diffuse_color = diffuseColor.values[0:3] if diffuseColor is not None else (1, 1, 1)
+        material.diffuse_color = (diffuseColor.values[0], diffuseColor.values[1], diffuseColor.values[2], 1.0) if diffuseColor is not None else (1, 1, 1, 1)
         material.diffuse_shader = 'LAMBERT'
         material.diffuse_intensity = 1.0
         specularColor = BMDLShaderParamFloat.getParameter(mesh["shaderFloatParams"], "SpecularTint")
-        material.specular_color = specularColor.values if specularColor is not None else (1, 1, 1)
+        material.specular_color = (specularColor.values[0], specularColor.values[1], specularColor.values[2], 1.0) if specularColor is not None else (1, 1, 1, 1)
         material.specular_shader = 'COOKTORR'
         material.specular_intensity = 0.5
         material.blend_method = 'BLEND'  # set alpha blend mode
@@ -572,7 +591,7 @@ class BMDLVertex:
         self.normal = None
         self.tangent = None
         self.uv = None
-        self.color = None
+        self.color = (1, 1, 1, 1)
 
     def read(self, file, vertexFormat):
         for fmt in vertexFormat.fmt:
@@ -591,7 +610,7 @@ class BMDLVertex:
         self.uv = [readFloat(file), 0 - readFloat(file)]
 
     def readColor(self, file):
-        self.color = readInt(file)
+        self.color = (readInt(file), readInt(file), readInt(file), readInt(file))
 
     @staticmethod
     def decodeColor(color):
@@ -625,12 +644,12 @@ class BMDLVertexFormat:
         return "BMDLVertexFormat %s" % str(self.fmt)
 
 
-class ImportBMDL(bpy.types.Operator, ImportHelper):
+class ImportBMDL(bpy.types.Operator, ImportHelperMixin):
     bl_idname = "import_my_format.bmdl"
     bl_label = "Import BMDL"
 
     filename_ext = ".bmdl"
-    filter_glob = bpy.props.StringProperty(default="*.bmdl", options={'HIDDEN'})
+    filter_glob: bpy.props.StringProperty(default="*.bmdl", options={'HIDDEN'})
 
     def execute(self, context):
         file = open(self.filepath, 'br')
@@ -644,7 +663,7 @@ class ImportBMDL(bpy.types.Operator, ImportHelper):
 
 
 def bmdlImporter_menu_func(self, context):
-    self.layout.operator(ImportBMDL.bl_idname, text="Darkspore BMDL Model (.bmdl)")
+    self.layout.operator(ImportBMDL.bl_idname, text="Darkspore BMDL Model (.bmdl)").filter_glob = "*.bmdl"
 
 
 def register():
