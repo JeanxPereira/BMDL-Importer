@@ -305,7 +305,9 @@ def importBMDL(file):
 
     # Add triangles
     m.polygons.add(len(triangles) // 3)
-    m.polygons.foreach_set("vertices", unpack_face_list(triangles))
+    m.polygons.foreach_set("vertices", [v for l in triangles for v in l])    
+    m.update()  # Update mesh to recalculate normals and other attributes
+
 
     uvTex = m.uv_layers.new(name="DefaultUV")
     uvTex.name = "DefaultUV"
