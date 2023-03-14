@@ -305,7 +305,7 @@ def importBMDL(file):
 
     # Add triangles
     m.polygons.add(len(triangles) // 3)
-    m.polygons.foreach_set("vertices", [v for l in triangles for v in l])    
+    m.polygons.foreach_set("normal", [n for l in normals for n in l])
     m.update()  # Update mesh to recalculate normals and other attributes
 
 
