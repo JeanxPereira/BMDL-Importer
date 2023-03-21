@@ -296,7 +296,7 @@ def importBMDL(file):
         m = bpy.data.meshes.new(sections["shader"].name)
         obj = bpy.data.objects.new(sections["shader"].name, m)
 
-        bpy.context.scene.collection.objects.link(obj)
+        bpy.context.collection.objects.link(obj)
         bpy.context.view_layer.objects.active = obj
 
         # Add vertices
@@ -316,21 +316,21 @@ def importBMDL(file):
             uvTex.data[f].uv3 = vertices[face.vertices[2]].uv
 
         if BMDLVertex.readColor in vertexFormat.fmt:
-            colorLayer = m.vertex_colors.new(name="Col")
+            colorLayer = m.vertex_colors.new(name="Col", alpha=True)
 
             m.update()
 
             for t in range(0, sections["meshInfo"].triangleCount):
                 for i in range(0, 3):
-                    colorLayer.data[t*3 + i].color = BMDLVertex.decodeColor(vertices[triangles[t][i]].color)
+                    colorLayer.data[t3 + i].color = (BMDLVertex.decodeColor(vertices[triangles[t][i]].color), 1.0)
 
-        m.update(calc_edges=True, calc_tessface=True)
+        m.update(calc_edges=True, calc_loop_triangles=True)
 
 
         for mesh in meshes:
             material = bpy.data.materials.new(name=mesh["objectInfo"].name)
             diffuseColor = BMDLShaderParamFloat.getParameter(mesh["shaderFloatParams"], "DiffuseTint")
-            material.diffuse_color = diffuseColor.values[0:3] if diffuseColor is not None else (1, 1, 1)
+            material.diffuse_color = (diffuseColor.values[0:3], 1.0) if diffuseColor is not None else (1, 1, 1, 1)
             material.use_nodes = True
             bsdf = material.node_tree.nodes["Principled BSDF"]
             bsdf.inputs['Specular'].default_value = 0.5
@@ -353,11 +353,9 @@ def importBMDL(file):
             for t in range(mesh["firstIndex"]//3, mesh["firstIndex"]//3 + mesh["indicesCount"]//3):
                 m.polygons[t].material_index = material_index
 
-        m.update(calc_edges=True, calc_tessface=True)
+        m.update(calc_edges=True, calc_loop_triangles=True)
 
         return {'FINISHED'}
-
-
 
 class BMDLHeader:
     def __init__(self):
@@ -611,7 +609,7 @@ class BMDLVertexFormat:
         return "BMDLVertexFormat %s" % str(self.fmt)
 
 
-class ImportBMDL(bpy.types.Operator, ImportHelper):
+class ImportBMDL_OT(bpy.types.Operator, ImportHelper):
     bl_idname = "import_my_format.bmdl"
     bl_label = "Import BMDL"
 
@@ -629,7 +627,7 @@ class ImportBMDL(bpy.types.Operator, ImportHelper):
         return result
 
 def bmdlImporter_menu_func(self, context):
-    self.layout.operator(ImportBMDL.bl_idname, text="Darkspore BMDL Model (.bmdl)")
+    self.layout.operator(ImportBMDL_OT.bl_idname, text="Darkspore BMDL Model (.bmdl)")
 
 def register():
     bpy.utils.register_class(ImportBMDL)
