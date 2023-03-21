@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Darkspore BMDL Importer",
     "author": "Emd4600",
-    "blender": (2, 80, 0),
+    "blender": (2, 7, 1),
     "version": (0, 0, 1),
     "location": "File > Import-Export",
     "description": "Import Darkspore .bmdl model format.",
@@ -65,7 +65,7 @@ def readString(file):
     while byte != 0:
         stringBytes.append(byte)
         byte = readUByte(file)
-    return stringBytes.decode('utf-8')
+    return stringBytes.decode('latin-1')
 
 
 def expect(valueToExpect, expectedValue, errorString, file):
@@ -295,8 +295,8 @@ def importBMDL(file):
     m = bpy.data.meshes.new(sections["shader"].name)
     obj = bpy.data.objects.new(sections["shader"].name, m)
 
-    active_layer_collection.objects.link(obj)
-    context.view_layer.objects.active = obj
+    bpy.context.scene.objects.link(obj)
+    bpy.context.scene.objects.active = obj
 
     # Add vertices
     m.vertices.add(sections["meshInfo"].vertexCount)
@@ -304,10 +304,10 @@ def importBMDL(file):
         m.vertices[v].co = vertex.pos
 
     # Add triangles
-    m.tessfaces.add(len(triangles))
+    m.tessfaces.add(sections["meshInfo"].triangleCount)
     m.tessfaces.foreach_set("vertices_raw", unpack_face_list(triangles))
 
-    uvTex = m.uv_layers.new()
+    uvTex = m.tessface_uv_textures.new()
     uvTex.name = "DefaultUV"
 
     for f, face in enumerate(m.tessfaces):
@@ -317,7 +317,7 @@ def importBMDL(file):
         uvTex.data[f].uv4 = [0, 0]
 
     if BMDLVertex.readColor in vertexFormat.fmt:
-        colorLayer = m.vertex_colors.new(name="Col")
+        colorLayer = m.vertex_colors.new("Col")
 
         m.update()
 
@@ -325,7 +325,7 @@ def importBMDL(file):
             for i in range(0, 3):
                 colorLayer.data[t*3 + i].color = BMDLVertex.decodeColor(vertices[triangles[t][i]].color)
 
-    m.update(calc_edges=True)
+    m.update(calc_tessface=True)
 
     for mesh in meshes:
         material = bpy.data.materials.new(mesh["objectInfo"].name)
@@ -360,7 +360,7 @@ def importBMDL(file):
             # print(bpy.data.materials.find(mesh["material"].name))
             m.polygons[t].material_index = m.materials.find(mesh["material"].name)
 
-    m.update(calc_edges=True)
+    m.update(calc_tessface=True)
 
     return {'FINISHED'}
 
@@ -622,7 +622,7 @@ class ImportBMDL(bpy.types.Operator, ImportHelper):
     bl_label = "Import BMDL"
 
     filename_ext = ".bmdl"
-    filter_glob: bpy.props.StringProperty(default="*.bmdl", options={'HIDDEN'})
+    filter_glob = bpy.props.StringProperty(default="*.bmdl", options={'HIDDEN'})
 
     def execute(self, context):
         file = open(self.filepath, 'br')
@@ -636,18 +636,18 @@ class ImportBMDL(bpy.types.Operator, ImportHelper):
 
 
 def bmdlImporter_menu_func(self, context):
-    layout.operator(ImportBMDL.bl_idname, text="Darkspore BMDL Model (.bmdl)")
+    self.layout.operator(ImportBMDL.bl_idname, text="Darkspore BMDL Model (.bmdl)")
 
 
 def register():
-    bpy.utils.register_class(ImportBMDL)
-    bpy.types.TOPBAR_MT_file_import.append(bmdlImporter_menu_func)
+    bpy.utils.register_module(__name__)
+    bpy.types.INFO_MT_file_import.append(bmdlImporter_menu_func)
 
 
 def unregister():
-    from sporemodder import rw4Settings
-    bpy.utils.unregister_class(ImportBMDL) because the unregister_module()
-    bpy.types.TOPBAR_MT_file_import.remove(bmdlImporter_menu_func)
+    # from sporemodder import rw4Settings
+    bpy.utils.unregister_module(__name__)
+    bpy.types.INFO_MT_file_import.remove(bmdlImporter_menu_func)
 
 if __name__ == "__main__":
     register()
