@@ -1,8 +1,8 @@
 bl_info = {
     "name": "Darkspore BMDL Importer",
     "author": "Emd4600",
-    "blender": (2, 7, 1),
     "version": (0, 0, 1),
+    "blender": (2, 80, 0),
     "location": "File > Import-Export",
     "description": "Import Darkspore .bmdl model format.",
     "category": "Import-Export"
@@ -65,7 +65,7 @@ def readString(file):
     while byte != 0:
         stringBytes.append(byte)
         byte = readUByte(file)
-    return stringBytes.decode('latin-1')
+    return stringBytes.decode('utf-8')
 
 
 def expect(valueToExpect, expectedValue, errorString, file):
@@ -132,7 +132,6 @@ def importBMDL(file):
     objects = []
     vertexFormat = None
     try:
-
         header = BMDLHeader()
         header.read(file)
 
@@ -150,7 +149,6 @@ def importBMDL(file):
         offsetInd = count
 
         # Read meshes
-
         for i in range(0, sections["hash"].count):
             mesh = {}
 
@@ -206,7 +204,6 @@ def importBMDL(file):
         offsetInd += 1
 
         # We read the section parameters
-
         for mesh in meshes:
             shaderProperties = []
             numParams = orderedSections[orderedSections.index(mesh["int1"])-1].count
@@ -226,50 +223,51 @@ def importBMDL(file):
             mesh["shaderFloatParams"] = shaderProperties
 
             shaderStringParams = []
-            # is it always 8 ?
-            # Just a guess, unkInt4 has the textures count and unkInt5 the vertex channels count
-            for i in range(0, mesh["int2"].unk + mesh["int3"].unk):
-                file.seek(header.headerSize + header.offsets[offsetInd+1])
-                value = BMDLShaderParamString(file, header.headerSize)
+        # is it always 8 ?
+        # Just a guess, unkInt4 has the textures count and unkInt5 the vertex channels count
+        for i in range(0, mesh["int2"].unk + mesh["int3"].unk):
+            file.seek(header.headerSize + header.offsets[offsetInd+1])
+            value = BMDLShaderParamString(file, header.headerSize)
 
-                file.seek(header.headerSize + header.offsets[offsetInd])
-                shaderStringParam = BMDLShaderParamString(file, header.headerSize, value)
+            file.seek(header.headerSize + header.offsets[offsetInd])
+            shaderStringParam = BMDLShaderParamString(file, header.headerSize, value)
 
-                offsetInd += 2
+            offsetInd += 2
 
-                shaderStringParams.append(shaderStringParam)
-                print(shaderStringParam.name + "\t" + str(shaderStringParam.value.name))
+            shaderStringParams.append(shaderStringParam)
+            print(shaderStringParam.name + "\t" + str(shaderStringParam.value.name))
 
-            mesh["shaderStringParams"] = shaderStringParams
+        mesh["shaderStringParams"] = shaderStringParams
 
         # Here we read the model data
 
         vertices = []
         triangles = []
 
-        file.seek(header.headerSize + sections["vertexFormatOffset"].dataOffset)
+        file.seek(header.headerSize + sections["vertex_format"].dataOffset)
         vertexFormat = BMDLVertexFormat(file)
 
-        file.seek(header.headerSize + sections["vertexBufferOffset"].dataOffset)
-        for i in range(0, sections["meshInfo"].vertexCount):
+        file.seek(header.headerSize + sections["vertex_buffer"].dataOffset)
+        for i in range(0, sections["mesh_info"].vertexCount):
             vertex = BMDLVertex()
             vertex.read(file, vertexFormat)
             vertices.append(vertex)
 
-        file.seek(header.headerSize + sections["meshInfo"].dataOffset)
-        for i in range(0, sections["meshInfo"].triangleCount):
-            triangles.append((readUShort(file), readUShort(file), readUShort(file)))
+        file.seek(header.headerSize + sections["mesh_info"].dataOffset)
+        for i in range(0, sections["mesh_info"].triangleCount):
+            triangles.append((read_ushort(file), read_ushort(file), read_ushort(file)))
 
-        file.seek(header.headerSize + sections["shaderName"].dataOffset)
+        file.seek(header.headerSize + sections["shader_name"].dataOffset)
 
         for mesh in meshes:
             bounds = []
             for i in range(0, 8):
-                bounds.append(readFloat(file))
+                bounds.append(read_float(file))
             mesh["bounds"] = bounds
-            mesh["unkInt"] = readInt(file)  # ?
-            mesh["firstIndex"] = readInt(file)
-            mesh["indicesCount"] = readInt(file)
+            mesh["unkInt"] = read_int(file)  # ?
+            mesh["firstIndex"] = read_int(file)
+            mesh["indicesCount"] = read_int(file)
+
 
     finally:
         pass
@@ -290,79 +288,72 @@ def importBMDL(file):
         # finally:
         #     debugFile.close()
 
-    # Add data to Blender
+        # Add data to Blender
 
-    m = bpy.data.meshes.new(sections["shader"].name)
-    obj = bpy.data.objects.new(sections["shader"].name, m)
+        m = bpy.data.meshes.new(sections["shader"].name)
+        obj = bpy.data.objects.new(sections["shader"].name, m)
 
-    bpy.context.scene.objects.link(obj)
-    bpy.context.scene.objects.active = obj
+        bpy.context.scene.collection.objects.link(obj)
+        bpy.context.view_layer.objects.active = obj
 
-    # Add vertices
-    m.vertices.add(sections["meshInfo"].vertexCount)
-    for v, vertex in enumerate(vertices):
-        m.vertices[v].co = vertex.pos
+        # Add vertices
+        m.vertices.add(sections["meshInfo"].vertexCount)
+        for v, vertex in enumerate(vertices):
+            m.vertices[v].co = vertex.pos
 
-    # Add triangles
-    m.tessfaces.add(sections["meshInfo"].triangleCount)
-    m.tessfaces.foreach_set("vertices_raw", unpack_face_list(triangles))
+        # Add triangles
+        m.polygons.add(sections["meshInfo"].triangleCount)
+        m.polygons.foreach_set("vertices_raw", unpack_face_list(triangles))
 
-    uvTex = m.tessface_uv_textures.new()
-    uvTex.name = "DefaultUV"
+        uvTex = m.uv_layers.new(name="DefaultUV")
 
-    for f, face in enumerate(m.tessfaces):
-        uvTex.data[f].uv1 = vertices[face.vertices_raw[0]].uv
-        uvTex.data[f].uv2 = vertices[face.vertices_raw[1]].uv
-        uvTex.data[f].uv3 = vertices[face.vertices_raw[2]].uv
-        uvTex.data[f].uv4 = [0, 0]
+        for f, face in enumerate(m.polygons):
+            uvTex.data[f].uv1 = vertices[face.vertices_raw[0]].uv
+            uvTex.data[f].uv2 = vertices[face.vertices_raw[1]].uv
+            uvTex.data[f].uv3 = vertices[face.vertices_raw[2]].uv
 
-    if BMDLVertex.readColor in vertexFormat.fmt:
-        colorLayer = m.vertex_colors.new("Col")
+        if BMDLVertex.readColor in vertexFormat.fmt:
+            colorLayer = m.vertex_colors.new(name="Col")
 
-        m.update()
+            m.update()
 
-        for t in range(0, sections["meshInfo"].triangleCount):
-            for i in range(0, 3):
-                colorLayer.data[t*3 + i].color = BMDLVertex.decodeColor(vertices[triangles[t][i]].color)
+            for t in range(0, sections["meshInfo"].triangleCount):
+                for i in range(0, 3):
+                    colorLayer.data[t*3 + i].color = BMDLVertex.decodeColor(vertices[triangles[t][i]].color)
 
-    m.update(calc_tessface=True)
+        m.update(calc_edges=True, calc_tessface=True)
 
-    for mesh in meshes:
-        material = bpy.data.materials.new(mesh["objectInfo"].name)
-        diffuseColor = BMDLShaderParamFloat.getParameter(mesh["shaderFloatParams"], "DiffuseTint")
-        material.diffuse_color = diffuseColor.values[0:3] if diffuseColor is not None else (1, 1, 1)
-        material.diffuse_shader = 'LAMBERT'
-        material.diffuse_intensity = 1.0
-        specularColor = BMDLShaderParamFloat.getParameter(mesh["shaderFloatParams"], "SpecularTint")
-        material.specular_color = specularColor.values if specularColor is not None else (1, 1, 1)
-        material.specular_shader = 'COOKTORR'
-        material.specular_intensity = 0.5
-        material.alpha = 1
-        ambient = BMDLShaderParamFloat.getParameter(mesh["shaderFloatParams"], "AmbiLevel")
-        material.ambient = ambient.values[0] if ambient is not None else 1
 
-        loadTexture(mesh, "diffuseMap", material, file)
-        loadTexture(mesh, "normalMap", material, file)
-        loadTexture(mesh, "envMap", material, file)
+        for mesh in meshes:
+            material = bpy.data.materials.new(name=mesh["objectInfo"].name)
+            diffuseColor = BMDLShaderParamFloat.getParameter(mesh["shaderFloatParams"], "DiffuseTint")
+            material.diffuse_color = diffuseColor.values[0:3] if diffuseColor is not None else (1, 1, 1)
+            material.use_nodes = True
+            bsdf = material.node_tree.nodes["Principled BSDF"]
+            bsdf.inputs['Specular'].default_value = 0.5
+            specularColor = BMDLShaderParamFloat.getParameter(mesh["shaderFloatParams"], "SpecularTint")
+            bsdf.inputs['Specular Color'].default_value = specularColor.values if specularColor is not None else (1, 1, 1)
+            ambient = BMDLShaderParamFloat.getParameter(mesh["shaderFloatParams"], "AmbiLevel")
+            material.ambient = ambient.values[0] if ambient is not None else 1
 
-        m.materials.append(material)
+            loadTexture(mesh, "diffuseMap", material, file)
+            loadTexture(mesh, "normalMap", material, file)
+            loadTexture(mesh, "envMap", material, file)
 
-        mesh["material"] = material
+            m.materials.append(material)
 
-    bpy.ops.object.mode_set(mode='OBJECT')
-    for mesh in meshes:
-        print(mesh["material"].name)
-        print(bpy.data.materials.find(mesh["material"].name))
-        print("firstTri: " + str(mesh["firstIndex"]//3))
-        print("triCount: " + str(mesh["indicesCount"]//3))
-        print(range(mesh["firstIndex"]//3, mesh["firstIndex"]//3 + mesh["indicesCount"]//3))
-        for t in range(mesh["firstIndex"]//3, mesh["firstIndex"]//3 + mesh["indicesCount"]//3):
-            # print(bpy.data.materials.find(mesh["material"].name))
-            m.polygons[t].material_index = m.materials.find(mesh["material"].name)
+            mesh["material"] = material
 
-    m.update(calc_tessface=True)
+        bpy.ops.object.mode_set(mode='OBJECT')
+        for mesh in meshes:
+            material_index = m.materials.find(mesh["material"].name)
+            for t in range(mesh["firstIndex"]//3, mesh["firstIndex"]//3 + mesh["indicesCount"]//3):
+                m.polygons[t].material_index = material_index
 
-    return {'FINISHED'}
+        m.update(calc_edges=True, calc_tessface=True)
+
+        return {'FINISHED'}
+
 
 
 class BMDLHeader:
@@ -622,7 +613,7 @@ class ImportBMDL(bpy.types.Operator, ImportHelper):
     bl_label = "Import BMDL"
 
     filename_ext = ".bmdl"
-    filter_glob = bpy.props.StringProperty(default="*.bmdl", options={'HIDDEN'})
+    filter_glob: bpy.props.StringProperty(default="*.bmdl", options={'HIDDEN'})
 
     def execute(self, context):
         file = open(self.filepath, 'br')
@@ -634,20 +625,17 @@ class ImportBMDL(bpy.types.Operator, ImportHelper):
 
         return result
 
-
 def bmdlImporter_menu_func(self, context):
     self.layout.operator(ImportBMDL.bl_idname, text="Darkspore BMDL Model (.bmdl)")
 
-
 def register():
-    bpy.utils.register_module(__name__)
-    bpy.types.INFO_MT_file_import.append(bmdlImporter_menu_func)
-
+    bpy.utils.register_class(ImportBMDL)
+    bpy.types.TOPBAR_MT_file_import.append(bmdlImporter_menu_func)
 
 def unregister():
     # from sporemodder import rw4Settings
-    bpy.utils.unregister_module(__name__)
-    bpy.types.INFO_MT_file_import.remove(bmdlImporter_menu_func)
+    bpy.utils.unregister_class(ImportBMDL)
+    bpy.types.TOPBAR_MT_file_import.remove(bmdlImporter_menu_func)
 
 if __name__ == "__main__":
     register()
