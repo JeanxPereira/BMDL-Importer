@@ -244,8 +244,11 @@ def importBMDL(file):
         vertices = []
         triangles = []
 
-        file.seek(header.headerSize + sections["vertex_format"].dataOffset)
-        vertexFormat = BMDLVertexFormat(file)
+        if "vertex_format" in sections:
+            file.seek(header.headerSize + sections["vertex_format"].dataOffset)
+        else:
+            print("Error: vertex format section not found in file")
+
 
         file.seek(header.headerSize + sections["vertex_buffer"].dataOffset)
         for i in range(0, sections["mesh_info"].vertexCount):
@@ -303,14 +306,14 @@ def importBMDL(file):
 
         # Add triangles
         m.polygons.add(sections["meshInfo"].triangleCount)
-        m.polygons.foreach_set("vertices_raw", unpack_face_list(triangles))
+        m.polygons.foreach_set("vertices", unpack_face_list(triangles))
 
         uvTex = m.uv_layers.new(name="DefaultUV")
 
         for f, face in enumerate(m.polygons):
-            uvTex.data[f].uv1 = vertices[face.vertices_raw[0]].uv
-            uvTex.data[f].uv2 = vertices[face.vertices_raw[1]].uv
-            uvTex.data[f].uv3 = vertices[face.vertices_raw[2]].uv
+            uvTex.data[f].uv1 = vertices[face.vertices[0]].uv
+            uvTex.data[f].uv2 = vertices[face.vertices[1]].uv
+            uvTex.data[f].uv3 = vertices[face.vertices[2]].uv
 
         if BMDLVertex.readColor in vertexFormat.fmt:
             colorLayer = m.vertex_colors.new(name="Col")
