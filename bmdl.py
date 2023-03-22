@@ -19,7 +19,6 @@ bl_info = {
 # import them.
 # Some models have multiple vertex and triangle buffers (and vertex format too). I have no idea how these work
 
-
 import os
 import bpy
 import struct
@@ -271,6 +270,50 @@ def importBMDL(file):
             mesh["firstIndex"] = read_int(file)
             mesh["indicesCount"] = read_int(file)
 
+        # Create mesh and object for each mesh in the file
+        for mesh_data in meshes:
+            mesh = bpy.data.meshes.new(mesh_data["shaderName"].name)
+            obj = bpy.data.objects.new(mesh_data["shaderName"].name, mesh)
+
+            # Link object to the current collection
+            bpy.context.collection.objects.link(obj)
+
+            # Create bmesh to construct the mesh
+            bm = bmesh.new()
+
+            # Add vertices to the bmesh
+            for vertex in vertices:
+                bm.verts.new((vertex.x, vertex.y, vertex.z))
+
+            # Add triangles/faces to the bmesh
+            for tri in triangles:
+                bm.faces.new((bm.verts[tri[0]], bm.verts[tri[1]], bm.verts[tri[2]]))
+
+            # Update and free the bmesh
+            bm.normal_update()
+            bm.to_mesh(mesh)
+            bm.free()
+
+            # Set shading mode to smooth
+            for face in mesh.polygons:
+                face.use_smooth = True
+
+            # Create materials and assign to the mesh
+            material = bpy.data.materials.new(name=mesh_data["shaderName"].name)
+            mesh.materials.append(material)
+
+            # Set material properties
+            for shader_param in mesh_data["shaderFloatParams"]:
+                # Assuming you have updated the set_material_param function for Blender 2.80 API
+                set_material_param(material, shader_param.name, shader_param.values)
+
+            for shader_string_param in mesh_data["shaderStringParams"]:
+                # Assuming you have updated the set_material_texture function for Blender 2.80 API
+                set_material_texture(material, shader_string_param.name, shader_string_param.value.name)
+
+            m = bpy.data.meshes.new(sections["shader"].name)
+            obj = bpy.data.objects.new(sections["shader"].name, m)
+
 
     finally:
         pass
@@ -292,9 +335,6 @@ def importBMDL(file):
         #     debugFile.close()
 
         # Add data to Blender
-
-        m = bpy.data.meshes.new(sections["shader"].name)
-        obj = bpy.data.objects.new(sections["shader"].name, m)
 
         bpy.context.collection.objects.link(obj)
         bpy.context.view_layer.objects.active = obj
