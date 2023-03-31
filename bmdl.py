@@ -292,11 +292,23 @@ def importBMDL(file):
         m.vertices[v].co = vertex.pos
 
     # Add triangles
-    m.polygons.add(sections["meshInfo"].triangleCount)
+    for i in range(sections["meshInfo"].triangleCount):
+        m.polygons.add(1)
+        m.polygons[-1].vertices = sections["triangles"][i]
     m.loop_triangles.foreach_set("vertices_raw", unpack_list(triangles))
+
 
     uvTex = m.uv_loop_layer.new()
     uvTex.name = "DefaultUV"
+
+    for i in range(sections["meshInfo"].vertexCount):
+        m.vertices.add(1)
+
+    for i in range(sections["meshInfo"].triangleCount):
+        m.polygons.add(1)
+        m.polygons[-1].vertices = sections["triangles"][i]
+
+    m.update()
 
     for f, face in enumerate(m.loop_triangles):
         uvTex.data[f].uv1 = vertices[face.vertices_raw[0]].uv
