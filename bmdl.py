@@ -5,16 +5,16 @@ bl_info = {
     "version": (0, 0, 1),
     "location": "File > Import-Export",
     "description": "Import Darkspore .bmdl model format.",
-    "category": "Import-Export"
+    "category": "Import-Export",
 }
 
 import os
 import bpy
 import struct
 from bpy_extras.io_utils import ImportHelper
-from bpy_extras.io_utils import unpack_list
-from bpy.props import StringProperty
-
+from bpy_extras.io_utils import unpack_face_list
+from bpy.props import StringProperty, BoolProperty
+from bpy.types import Operator
 
 def readByte(file, endian='<'):
     return struct.unpack(endian + 'b', file.read(1))[0]
@@ -89,6 +89,7 @@ def loadTexture(mesh, textureType, material, file):
         tex.image = img
         slot.texture = tex
         slot.texture_coords = 'UV'
+
 
 def importBMDL(file):
 
@@ -261,56 +262,28 @@ def importBMDL(file):
 
     finally:
         pass
-        # Write log
-        # debugFile = open("C:\\Users\\Eric\\Desktop\\" + os.path.basename(file.name) + ".txt", "w")
-        # try:
-        #     for s in range(len(sectionVariables)):
-        #         debugFile.write(sectionVariables[s] + ":\t" + str(sections[sectionVariables[s]]) + "\n")
-        #
-        #     for mesh in meshes:
-        #         for s in meshSectionVariables:
-        #             if s in mesh:
-        #                 debugFile.write("mesh " + s + ":\t" + str(mesh[s]) + "\n")
-        #
-        #     if vertexFormat is not None:
-        #         debugFile.write("vertexFormat:\t" + str(vertexFormat) + "\n")
-        #
-        # finally:
-        #     debugFile.close()
 
     # Add data to Blender
 
     m = bpy.data.meshes.new(sections["shader"].name)
     obj = bpy.data.objects.new(sections["shader"].name, m)
 
-    bpy.context.collection.objects.link(obj)
-    bpy.context.view_layer.objects.active = obj
+    bpy.context.scene.objects.link(obj)
+    bpy.context.scene.objects.active = obj
 
     # Add vertices
-    faces = []
+    m.vertices.add(sections["meshInfo"].vertexCount)
     for v, vertex in enumerate(vertices):
         m.vertices[v].co = vertex.pos
 
     # Add triangles
-    for i in range(sections["meshInfo"].triangleCount):
-        m.polygons.add(1)
-        m.polygons[-1].vertices = sections["triangles"][i]
-    m.loop_triangles.foreach_set("vertices_raw", unpack_list(triangles))
+    m.tessfaces.add(sections["meshInfo"].triangleCount)
+    m.tessfaces.foreach_set("vertices_raw", unpack_face_list(triangles))
 
-
-    uvTex = m.uv_loop_layer.new()
+    uvTex = m.tessface_uv_textures.new()
     uvTex.name = "DefaultUV"
 
-    for i in range(sections["meshInfo"].vertexCount):
-        m.vertices.add(1)
-
-    for i in range(sections["meshInfo"].triangleCount):
-        m.polygons.add(1)
-        m.polygons[-1].vertices = sections["triangles"][i]
-
-    m.update()
-
-    for f, face in enumerate(m.loop_triangles):
+    for f, face in enumerate(m.tessfaces):
         uvTex.data[f].uv1 = vertices[face.vertices_raw[0]].uv
         uvTex.data[f].uv2 = vertices[face.vertices_raw[1]].uv
         uvTex.data[f].uv3 = vertices[face.vertices_raw[2]].uv
@@ -325,11 +298,7 @@ def importBMDL(file):
             for i in range(0, 3):
                 colorLayer.data[t*3 + i].color = BMDLVertex.decodeColor(vertices[triangles[t][i]].color)
 
-    obj = bpy.data.objects.new(mesh_name, mesh)
-    bpy.context.collection.objects.link(obj)
-    mesh.from_pydata(sections["vertices"], [], faces)
-    mesh.update()
-
+    m.update(calc_tessface=True)
 
     for mesh in meshes:
         material = bpy.data.materials.new(mesh["objectInfo"].name)
@@ -367,6 +336,7 @@ def importBMDL(file):
     m.update(calc_tessface=True)
 
     return {'FINISHED'}
+
 
 class BMDLHeader:
     def __init__(self):
@@ -620,33 +590,29 @@ class BMDLVertexFormat:
         return "BMDLVertexFormat %s" % str(self.fmt)
 
 
-class ImportBMDL(bpy.types.Operator, ImportHelper):
-    bl_idname = "import_my_format.bmdl"
+class ImportBMDL(Operator, ImportHelper):
+    """Import BMDL Operator"""
+    bl_idname = "import_mesh.bmdl"
     bl_label = "Import BMDL"
+    bl_options = {'REGISTER', 'UNDO'}
 
     filename_ext = ".bmdl"
     filter_glob: StringProperty(default="*.bmdl", options={'HIDDEN'})
 
     def execute(self, context):
-        file = open(self.filepath, 'br')
-        result = {'CANCELLED'}
-        try:
-            result = importBMDL(file)
-        finally:
-            file.close()
+        with open(self.filepath, "rb") as file:
+            return importBMDL(file)
 
-        return result
-
-def bmdlImporter_menu_func(self, context):
-    self.layout.operator(ImportBMDL.bl_idname, text="Darkspore BMDL Model (.bmdl)")
+def menu_func_import(self, context):
+    self.layout.operator(ImportBMDL.bl_idname, text="Darkspore BMDL (.bmdl)")
 
 def register():
     bpy.utils.register_class(ImportBMDL)
-    bpy.types.TOPBAR_MT_file_import.append(bmdlImporter_menu_func)
+    bpy.types.TOPBAR_MT_file_import.append(menu_func_import)
 
 def unregister():
     bpy.utils.unregister_class(ImportBMDL)
-    bpy.types.TOPBAR_MT_file_import.remove(bmdlImporter_menu_func)
+    bpy.types.TOPBAR_MT_file_import.remove(menu_func_import)
 
 if __name__ == "__main__":
     register()
