@@ -1,20 +1,33 @@
 bl_info = {
     "name": "Darkspore BMDL Importer",
     "author": "Emd4600",
-    "blender": (2, 80, 0),
     "version": (0, 0, 1),
+    "blender": (2, 80, 0),
     "location": "File > Import-Export",
+    "warning": "",
     "description": "Import Darkspore .bmdl model format.",
     "category": "Import-Export",
+    "wiki_url": ""
 }
+
+# Important!
+# Don't believe anything I've written. My initial supposition is probably wrong.
+# The header has some offsets that point to "sections". Those sections are always made with an offset and X number
+# of data -- that data is usually about the offset of the next section --. The value of X depends on the data it's
+# representing - I don't know if it follow any arbitrary order or there is some kind of section type identifier
+# somewhere; this is the main problem I've had reading these files
+#
+# Usually, there's only one vertex/triangle buffer, which can be structured in multiple meshes; I think this is able to
+# import them.
+# Some models have multiple vertex and triangle buffers (and vertex format too). I have no idea how these work
+
 
 import os
 import bpy
 import struct
 from bpy_extras.io_utils import ImportHelper
 from bpy_extras.io_utils import unpack_face_list
-from bpy.props import StringProperty, BoolProperty
-from bpy.types import Operator
+
 
 def readByte(file, endian='<'):
     return struct.unpack(endian + 'b', file.read(1))[0]
@@ -262,14 +275,29 @@ def importBMDL(file):
 
     finally:
         pass
+        # Write log
+        # debugFile = open("C:\\Users\\Eric\\Desktop\\" + os.path.basename(file.name) + ".txt", "w")
+        # try:
+        #     for s in range(len(sectionVariables)):
+        #         debugFile.write(sectionVariables[s] + ":\t" + str(sections[sectionVariables[s]]) + "\n")
+        #
+        #     for mesh in meshes:
+        #         for s in meshSectionVariables:
+        #             if s in mesh:
+        #                 debugFile.write("mesh " + s + ":\t" + str(mesh[s]) + "\n")
+        #
+        #     if vertexFormat is not None:
+        #         debugFile.write("vertexFormat:\t" + str(vertexFormat) + "\n")
+        #
+        # finally:
+        #     debugFile.close()
 
     # Add data to Blender
-
     m = bpy.data.meshes.new(sections["shader"].name)
     obj = bpy.data.objects.new(sections["shader"].name, m)
 
-    bpy.context.scene.objects.link(obj)
-    bpy.context.scene.objects.active = obj
+    bpy.context.collection.objects.link(obj)  # Updated for 2.80+
+    bpy.context.view_layer.objects.active = obj  # Updated for 2.80+
 
     # Add vertices
     m.vertices.add(sections["meshInfo"].vertexCount)
@@ -277,16 +305,15 @@ def importBMDL(file):
         m.vertices[v].co = vertex.pos
 
     # Add triangles
-    m.tessfaces.add(sections["meshInfo"].triangleCount)
-    m.tessfaces.foreach_set("vertices_raw", unpack_face_list(triangles))
+    m.polygons.add(sections["meshInfo"].triangleCount)  # Replace tessfaces with polygons
+    m.polygons.foreach_set("vertices", unpack_face_list(triangles))  # Replace vertices_raw with vertices
 
-    uvTex = m.tessface_uv_textures.new()
-    uvTex.name = "DefaultUV"
+    m.update()
 
-    for f, face in enumerate(m.tessfaces):
-        uvTex.data[f].uv1 = vertices[face.vertices_raw[0]].uv
-        uvTex.data[f].uv2 = vertices[face.vertices_raw[1]].uv
-        uvTex.data[f].uv3 = vertices[face.vertices_raw[2]].uv
+    for f, face in enumerate(m.polygons):
+        uvTex.data[f].uv1 = vertices[face.vertices[0]].uv
+        uvTex.data[f].uv2 = vertices[face.vertices[1]].uv
+        uvTex.data[f].uv3 = vertices[face.vertices[2]].uv
         uvTex.data[f].uv4 = [0, 0]
 
     if BMDLVertex.readColor in vertexFormat.fmt:
@@ -298,7 +325,7 @@ def importBMDL(file):
             for i in range(0, 3):
                 colorLayer.data[t*3 + i].color = BMDLVertex.decodeColor(vertices[triangles[t][i]].color)
 
-    m.update(calc_tessface=True)
+    m.update()
 
     for mesh in meshes:
         material = bpy.data.materials.new(mesh["objectInfo"].name)
@@ -333,7 +360,7 @@ def importBMDL(file):
             # print(bpy.data.materials.find(mesh["material"].name))
             m.polygons[t].material_index = m.materials.find(mesh["material"].name)
 
-    m.update(calc_tessface=True)
+    m.update()
 
     return {'FINISHED'}
 
@@ -590,29 +617,37 @@ class BMDLVertexFormat:
         return "BMDLVertexFormat %s" % str(self.fmt)
 
 
-class ImportBMDL(Operator, ImportHelper):
-    """Import BMDL Operator"""
-    bl_idname = "import_mesh.bmdl"
+class ImportBMDL(bpy.types.Operator, ImportHelper):
+    bl_idname = "import_my_format.bmdl"
     bl_label = "Import BMDL"
-    bl_options = {'REGISTER', 'UNDO'}
 
     filename_ext = ".bmdl"
-    filter_glob: StringProperty(default="*.bmdl", options={'HIDDEN'})
+    filter_glob: bpy.props.StringProperty(default="*.bmdl", options={'HIDDEN'})
 
     def execute(self, context):
-        with open(self.filepath, "rb") as file:
-            return importBMDL(file)
+        file = open(self.filepath, 'br')
+        result = {'CANCELLED'}
+        try:
+            result = importBMDL(file)
+        finally:
+            file.close()
 
-def menu_func_import(self, context):
-    self.layout.operator(ImportBMDL.bl_idname, text="Darkspore BMDL (.bmdl)")
+        return result
+
+
+def bmdlImporter_menu_func(self, context):
+    self.layout.operator(ImportBMDL.bl_idname, text="Darkspore BMDL Model (.bmdl)")
+
 
 def register():
     bpy.utils.register_class(ImportBMDL)
-    bpy.types.TOPBAR_MT_file_import.append(menu_func_import)
+    bpy.types.TOPBAR_MT_file_import.append(bmdlImporter_menu_func)
+
 
 def unregister():
     bpy.utils.unregister_class(ImportBMDL)
-    bpy.types.TOPBAR_MT_file_import.remove(menu_func_import)
+    bpy.types.TOPBAR_MT_file_import.remove(bmdlImporter_menu_func)
+
 
 if __name__ == "__main__":
     register()
