@@ -29,6 +29,7 @@ import struct
 from bpy_extras.io_utils import ImportHelper
 from bpy_extras.io_utils import unpack_face_list
 
+imported_objects = []
 
 def readByte(file, endian='<'):
     return struct.unpack(endian + 'b', file.read(1))[0]
@@ -53,10 +54,19 @@ def readInt(file, endian='<'):
 def readUInt(file, endian='<'):
     return struct.unpack(endian + 'I', file.read(4))[0]
 
-
 def readFloat(file, endian='<'):
-    return struct.unpack(endian + 'f', file.read(4))[0]
-
+    try:
+        print("File position before reading float:", file.tell())
+        data = file.read(4)
+        print("Data length:", len(data))
+        if len(data) == 0:
+            return None
+        value = struct.unpack(endian + 'f', data)[0]
+        print("Read float:", value)
+        return value
+    except struct.error:
+        print("Error reading float at file position:", file.tell())
+        raise
 
 def readBoolean(file, endian='<'):
     return struct.unpack(endian + '?', file.read(1))[0]
@@ -68,7 +78,7 @@ def readString(file):
     while byte != 0:
         stringBytes.append(byte)
         byte = readUByte(file)
-    return stringBytes.decode('utf-8')
+    return stringBytes.decode('latin-1')
 
 
 def expect(valueToExpect, expectedValue, errorString, file):
@@ -129,9 +139,9 @@ def importBMDL(file):
     # For some weird reason, it's like some sections are meant to use the previous section data,
     # even if they are not related
     orderedSections = []
-
     sections = {}
     meshes = []
+    imported_objects = []
     objects = []
     vertexFormat = None
     try:
@@ -295,8 +305,12 @@ def importBMDL(file):
 
     # Add data to Blender
 
-    m = bpy.data.meshes.new(sections["shader"].name)
-    obj = bpy.data.objects.new(sections["shader"].name, m)
+    filename = os.path.splitext(os.path.basename(file.name))[0]
+
+    m = bpy.data.meshes.new(filename)
+    obj = bpy.data.objects.new(filename, m)
+
+    imported_objects.append(obj)
 
     bpy.context.collection.objects.link(obj)
     bpy.context.view_layer.objects.active = obj
@@ -328,26 +342,23 @@ def importBMDL(file):
 
     for mesh in meshes:
         material = bpy.data.materials.new(mesh["objectInfo"].name)
+        
+        # Set the material properties
         diffuseColor = BMDLShaderParamFloat.getParameter(mesh["shaderFloatParams"], "DiffuseTint")
-        material.diffuse_color = diffuseColor.values[0:3] if diffuseColor is not None else (1, 1, 1)
-        material.diffuse_shader = 'LAMBERT'
-        material.diffuse_intensity = 1.0
-        specularColor = BMDLShaderParamFloat.getParameter(mesh["shaderFloatParams"], "SpecularTint")
-        material.specular_color = specularColor.values if specularColor is not None else (1, 1, 1)
-        material.specular_shader = 'COOKTORR'
-        material.specular_intensity = 0.5
-        material.alpha = 1
-        ambient = BMDLShaderParamFloat.getParameter(mesh["shaderFloatParams"], "AmbiLevel")
-        material.ambient = ambient.values[0] if ambient is not None else 1
-
-        loadTexture(mesh, "diffuseMap", material, file)
-        loadTexture(mesh, "normalMap", material, file)
-        loadTexture(mesh, "envMap", material, file)
-
+        material.diffuse_color = diffuseColor.values[0:4] if diffuseColor is not None else (1, 1, 1, 1)
+        material.use_nodes = True
+        
+        # Create a principled BSDF node and connect it to the material output
+        material_output = material.node_tree.nodes.get('Material Output')
+        principled_node = material.node_tree.nodes.new('ShaderNodeBsdfPrincipled')
+        material.node_tree.links.new(principled_node.outputs['BSDF'], material_output.inputs['Surface'])
+        
+        # Set other material properties as desired
+        
+        # Assign the material to the mesh
         m.materials.append(material)
-
         mesh["material"] = material
-
+        
     bpy.ops.object.mode_set(mode='OBJECT')
     for mesh in meshes:
         print(mesh["material"].name)
@@ -515,14 +526,19 @@ class BMDLShaderParamFloat:
         file.seek(baseOffset + self.nameOffset)
         self.name = readString(file)
 
-    def readValues(self, file, valuesAddress):
-        file.seek(valuesAddress + self.dataIndex * 4)
-        for i in range(0, self.dataLength):
-            self.values.append(readFloat(file))
+    def readValues(self, file, address):
+        self.values = []
+        file.seek(address)
+        while True:
+            value = readFloat(file, endian='<')  # Add endian parameter
+            if value is None:
+                break
+            self.values.append(value)
 
     def __str__(self):
-        return "BMDLShaderParamFloat [nameOffset=%d, hash=%x, dataIndex=%d, dataLength=%d, name=%s, values=%s]" % \
-               (self.nameOffset, self.hash, self.dataIndex, self.dataLength, self.name, str(self.values))
+        return "BMDLSectionMesh [dataOffset=%d, vertexCount=%s, indicesCount=%d, triangleCount=%d, bounds=%s, " \
+            "unk1=%d, unk2=%d]" % (self.dataOffset, self.vertexCount, self.indicesCount, self.triangleCount,
+                                    str(self.bounds), self.unk1, self.unk2)
 
     @staticmethod
     def getParameter(parameters, name):
@@ -552,7 +568,6 @@ class BMDLShaderParamString:
             if param.name == name:
                 return param
         return None
-
 
 class BMDLVertex:
     def __init__(self):
