@@ -1,6 +1,0 @@
-LIBRARY pcximage
-EXPORTS
-	NPAPI_Init
-	NPAPI_Shutdown
-	NPAPI_GetPluginVer
-	NPAPI_GetPluginInfo

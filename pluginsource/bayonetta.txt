@@ -1,2 +1,0 @@
-The Bayonetta plugin source has been removed from this package, you can now find a much enhanced version of it maintained by Brice Videau at:
-https://github.com/Kerilk/noesis_bayonetta_pc

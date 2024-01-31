@@ -1,6 +1,0 @@
-Sorry this is all awful and ancient example plugin code. I'll put some newer projects in here one day, and as a bonus the code won't be completely disgusting and stupid like this code! But for now, here's a text file. Damn us lazy devs.
-
-If you want to build a native plugin to support Noesis x64 builds, just add _NOE64 to the preprocessor definitions in your x64 platform configuration, and you'll be good to go. These plugin projects should automatically up-convert for every Visual Studio in existence without issue.
-
-Love,
-Dickles

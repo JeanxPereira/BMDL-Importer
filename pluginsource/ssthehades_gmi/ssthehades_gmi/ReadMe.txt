@@ -1,1 +1,0 @@
-saint seiya: the hades plugin
