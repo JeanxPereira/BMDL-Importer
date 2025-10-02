@@ -1,0 +1,11 @@
+schema_version = "1.0.0"
+id = "io_darkspore"
+version = "0.8.6"
+name = "Darkspore BMDL Importer"
+tagline = "Import Darkspore BMDL models and animations"
+maintainer = "JeanxPereira & foehammer"
+type = "add-on"
+blender_version_min = "4.5.0"
+license = [
+"SPDX:GPL-3.0-or-later",
+]

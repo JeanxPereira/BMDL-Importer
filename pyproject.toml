@@ -1,0 +1,38 @@
+
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "io-darkspore-bmdl"
+version = "0.8.6"
+description = "Blender add-on: Import Darkspore .bmdl"
+authors = [
+{ name = "JeanxPereira" },
+{ name = "foehammer" },
+]
+license = { text = "GPL-3.0-or-later" }
+requires-python = ">=3.11"
+classifiers = [
+"Programming Language :: Python :: 3",
+"Framework :: Blender",
+"License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["io_darkspore*"]
+
+[tool.black]
+line-length = 120
+
+[tool.ruff]
+line-length = 120
+select = ["E","F","I"]
+ignore = []
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
