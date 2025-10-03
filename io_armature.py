@@ -9,7 +9,7 @@ def apply_axis_to_bind(mat_bind, m3):
     t  = Vector((mat_bind[3][0], mat_bind[3][1], mat_bind[3][2]))
     if m3 is not None:
         m3i = m3.inverted_safe()
-        r_out = m3 @ r3 @ m3i
+        r_out = m3 @ r3 # @ m3i
         t_out = m3 @ t
     else:
         r_out = r3

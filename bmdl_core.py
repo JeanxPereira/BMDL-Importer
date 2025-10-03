@@ -576,6 +576,7 @@ def _decode_animation(ds, header, raw, bone_names, settings):
     bones = {}
     timeline = {}
     alog = settings.get("anim_logger", None)
+    
     for i, r in enumerate(raw):
         if not (0 <= r.bone_index < len(bone_names)):
             continue
@@ -583,35 +584,40 @@ def _decode_animation(ds, header, raw, bone_names, settings):
             if alog:
                 alog.log(f't={i} bone="{bone_names[r.bone_index]}" cat={"PRS"[r.category-1]} keys=0 warn=PTR_RANGE')
             continue
+        
         n = (r.values_ptr - r.times_ptr) // 4
         k = dims.get(r.category, 3)
         nvals = n * k
         a_t = ds.base + r.times_ptr
         a_v = ds.base + r.values_ptr
         limit = ds.base + ds.graph_size
+        
         if a_v + nvals * 4 > limit:
             maxn = max(0, (limit - a_v) // 4 // max(k, 1))
             if alog:
                 alog.log(f't={i} bone="{bone_names[r.bone_index]}" cat={"PRS"[r.category-1]} keys={n} warn=BUF_OVERFLOW')
             n = maxn
             nvals = n * k
+        
         if n <= 0:
             continue
+        
         bt_all = [struct.unpack_from("<f", ds.d, a_t + j * 4)[0] for j in range(n)]
         bt = [t for t in bt_all if 0.0 <= t <= max(header.duration, 0.0)]
         if not bt:
             bt = [0.0]
+        
         bv = [struct.unpack_from("<f", ds.d, a_v + j * 4)[0] for j in range(nvals)]
-
+        
         bname = bone_names[r.bone_index]
         bones.setdefault(bname, {})
         timeline.setdefault(bname, {})
-
+        
         warn = []
         if not _is_monotonic(bt):
             warn.append("NONMONO_T")
             bt = sorted(bt)
-
+        
         if r.category == 1:
             nn = min(len(bt), len(bv) // 3)
             if nn <= 0:
@@ -619,14 +625,16 @@ def _decode_animation(ds, header, raw, bone_names, settings):
             vals = [tuple(bv[j * 3:(j + 1) * 3]) for j in range(nn)]
             bt = bt[:nn]
             bones[bname]["location"] = vals
+            bones[bname]["location_is_absolute"] = True
             timeline[bname]["location"] = bt
-
+        
         elif r.category == 2:
             nn = min(len(bt), len(bv) // 4)
             if nn <= 0:
                 continue
             vals = [tuple(bv[j * 4:(j + 1) * 4]) for j in range(nn)]
             bt = bt[:nn]
+            
             layout = (settings.get("anim_quat_layout") or "xyzw").lower()
             if not (len(layout) == 4 and set(layout) == set("wxyz")):
                 layout = "xyzw"
@@ -634,6 +642,7 @@ def _decode_animation(ds, header, raw, bone_names, settings):
             signs = (settings.get("anim_quat_signs") or "++++")
             signs = (signs + "++++")[:4]
             sgn = [1.0 if c != "-" else -1.0 for c in signs]
+            
             quats = []
             prev = None
             for v in vals:
@@ -646,13 +655,15 @@ def _decode_animation(ds, header, raw, bone_names, settings):
                     w, x, y, z = -w, -x, -y, -z
                 quats.append((w, x, y, z))
                 prev = (w, x, y, z)
+            
             bones[bname]["rotation_quaternion"] = quats
             timeline[bname]["rotation_quaternion"] = bt
+            
             if settings.get("anim_rotation_mode", "QUATERNION") == "EULER_XYZ":
                 e = [Quaternion(q).to_euler('XYZ') for q in quats]
                 bones[bname]["rotation_euler"] = [(x.x, x.y, x.z) for x in e]
                 timeline[bname]["rotation_euler"] = bt
-
+        
         elif r.category == 3:
             nn = min(len(bt), len(bv) // 3)
             if nn <= 0:
@@ -661,10 +672,10 @@ def _decode_animation(ds, header, raw, bone_names, settings):
             bt = bt[:nn]
             bones[bname]["scale"] = vals
             timeline[bname]["scale"] = bt
-
+        
         if alog and warn:
             alog.log(f't={i} bone="{bname}" cat={"PRS"[r.category-1]} keys={len(bt)} warn={".".join(warn)}')
-
+    
     return ResolvedAnim(header.name, header.duration, bones, timeline) if bones else None
 
 def _is_monotonic(x):

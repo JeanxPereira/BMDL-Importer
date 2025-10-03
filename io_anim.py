@@ -33,7 +33,6 @@ class AnimLogger:
     def clear(self):
         self.lines.clear()
 
-
 def _rot_from_m3(m3):
     if m3 is None:
         return None
@@ -44,7 +43,6 @@ def _rot_from_m3(m3):
         pass
     return q
 
-
 def axis_apply_loc(v, m3):
     if not isinstance(v, Vector):
         v = Vector(v)
@@ -53,7 +51,6 @@ def axis_apply_loc(v, m3):
     r = m3 @ v
     return (r.x, r.y, r.z)
 
-
 def axis_apply_quat(q, m3):
     qq = Quaternion((q[0], q[1], q[2], q[3]))
     if m3 is not None:
@@ -61,7 +58,6 @@ def axis_apply_quat(q, m3):
         qq = qm @ qq @ qm.inverted()
     qq.normalize()
     return (qq.w, qq.x, qq.y, qq.z)
-
 
 def axis_apply_scale(s, m3):
     if not isinstance(s, Vector):
@@ -81,12 +77,9 @@ def axis_apply_scale(s, m3):
         out[i] = sign * val
     return (out[0], out[1], out[2])
 
-
-
 def quat_to_euler_xyz(q):
     e = Quaternion(q).to_euler('XYZ')
     return (e.x, e.y, e.z)
-
 
 def ensure_action(arm_obj, name):
     if not arm_obj.animation_data:
@@ -95,10 +88,8 @@ def ensure_action(arm_obj, name):
     arm_obj.animation_data.action = act
     return act
 
-
 def ensure_group(act, name):
     return act.groups.get(name) or act.groups.new(name)
-
 
 def ensure_fcurve(act, bone, path, idx, logger=None):
     g = ensure_group(act, bone)
@@ -113,7 +104,6 @@ def ensure_fcurve(act, bone, path, idx, logger=None):
     if logger:
         logger.log(f'[fcurve] create path="{path}" idx={idx} group="{bone}"')
     return fc
-
 
 def write_channel(fc, frames, values):
     n = min(len(frames), len(values))
@@ -133,7 +123,6 @@ def write_channel(fc, frames, values):
     for kp in kps:
         kp.interpolation = "LINEAR"
 
-
 def map_frames(times, duration, settings):
     if not times:
         return []
@@ -146,7 +135,6 @@ def map_frames(times, duration, settings):
         return [float(t) * s for t in times]
     sec = [float(t) * dur for t in times] if (tmax <= 1.05 and dur > 1.5) else [float(t) for t in times]
     return [t * fps for t in sec]
-
 
 def bake_resolved_anim(arm_obj, anim, settings):
     act = ensure_action(arm_obj, anim.name)
@@ -161,12 +149,14 @@ def bake_resolved_anim(arm_obj, anim, settings):
     rest_R_chain_inv = {}
     rest_t_abs = {}
     rest_q_local = {}
+    parent_map = {}
 
     def build_rest_chain(b):
         if b.name in rest_R_chain:
             return
         if b.parent:
             build_rest_chain(b.parent)
+            parent_map[b.name] = b.parent.name
             Rp = rest_R_chain[b.parent.name]
             tp = rest_t_abs[b.parent.name]
             Rb = b.matrix_local.to_3x3()
@@ -177,6 +167,7 @@ def bake_resolved_anim(arm_obj, anim, settings):
             rest_R_chain_inv[b.name] = Rc.inverted()
             rest_t_abs[b.name] = tc
         else:
+            parent_map[b.name] = None
             Rb = b.matrix_local.to_3x3()
             tb = b.matrix_local.to_translation()
             rest_R_chain[b.name] = Rb
@@ -201,15 +192,40 @@ def bake_resolved_anim(arm_obj, anim, settings):
             tl = map_frames(list(t_loc_raw), anim.duration, settings)
             if not tl and data["location"]:
                 tl = list(range(len(data["location"])))
-            Rc_inv = rest_R_chain_inv.get(bone)
-            t_rest = rest_t_abs.get(bone)
+            
+            is_absolute = data.get("location_is_absolute", False)
             loc = []
-            for v in data["location"]:
-                la = Vector(axis_apply_loc(v, m3))
-                d = la - t_rest if t_rest is not None else la
-                if Rc_inv is not None:
-                    d = Rc_inv @ d
-                loc.append((d.x, d.y, d.z))
+            
+            if is_absolute:
+                parent_name = parent_map.get(bone)
+                t_rest = rest_t_abs.get(bone, Vector((0, 0, 0)))
+                
+                if parent_name is not None:
+                    Rp_inv = rest_R_chain_inv.get(parent_name)
+                    tp_rest = rest_t_abs.get(parent_name, Vector((0, 0, 0)))
+                    
+                    for v in data["location"]:
+                        v_global = Vector(axis_apply_loc(v, m3))
+                        v_relative = v_global - tp_rest
+                        if Rp_inv is not None:
+                            v_local = Rp_inv @ v_relative
+                        else:
+                            v_local = v_relative
+                        loc.append((v_local.x, v_local.y, v_local.z))
+                else:
+                    for v in data["location"]:
+                        v_global = Vector(axis_apply_loc(v, m3))
+                        loc.append((v_global.x, v_global.y, v_global.z))
+            else:
+                Rc_inv = rest_R_chain_inv.get(bone)
+                t_rest = rest_t_abs.get(bone)
+                for v in data["location"]:
+                    la = Vector(axis_apply_loc(v, m3))
+                    d = la - t_rest if t_rest is not None else la
+                    if Rc_inv is not None:
+                        d = Rc_inv @ d
+                    loc.append((d.x, d.y, d.z))
+            
             path = f'pose.bones["{be}"].location'
             for i in range(3):
                 fc = ensure_fcurve(act, bone, path, i, alog)
@@ -282,7 +298,6 @@ def bake_resolved_anim(arm_obj, anim, settings):
             for i in range(3):
                 fc = ensure_fcurve(act, bone, path, i, alog)
                 write_channel(fc, ts, [v[i] for v in scl])
-
 
 def import_animations(ds, tb, arm_obj, bone_names, settings):
     alog = settings.get("anim_logger", None)

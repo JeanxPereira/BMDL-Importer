@@ -1,6 +1,7 @@
 import bpy
 import os
 import time
+import re
 from mathutils import Vector
 from .bmdl_core import _extract_params
 from .utils import darkspore_hash
@@ -123,6 +124,21 @@ def _find_by_hash(value_hash, search_dirs, img_cache, max_depth=5):
                         return img, path
     return None, None
 
+def _force_ignore_alpha(img):
+    try:
+        img.use_alpha = False
+    except Exception:
+        pass
+    try:
+        # Blender 4.x: 'STRAIGHT' | 'PREMUL' | 'CHANNEL_PACKED'
+        img.alpha_mode = 'CHANNEL_PACKED'
+    except Exception:
+        # fallback (old version with 'NONE')
+        try:
+            img.alpha_mode = 'NONE'
+        except Exception:
+            pass
+
 def make_principled_material(name, mat_entries, streams, uv_name, search_dirs, img_cache, mat_cache, missing_log, debug=False, mesh_name=None, cache_id=None, override_base=None, override_norm=None, logger=None):
     key = (cache_id or name or "BMDL_MAT", uv_name or "", tuple(search_dirs))
     m = mat_cache.get(key)
@@ -180,14 +196,16 @@ def make_principled_material(name, mat_entries, streams, uv_name, search_dirs, i
                 img, path = _find_by_stem(stem, search_dirs, img_cache)
                 if img:
                     try:
-                        img.use_alpha = False; img.alpha_mode = "NONE"
+                        img.use_alpha = False
+                        img.alpha_mode = "NONE"
                     except Exception:
                         pass
                     try:
-                        img.colorspace_settings.name = color_space
+                        img.colorspace_settings.name = "sRGB"
                     except Exception:
                         pass
                     map_node.image = img
+                    nt.links.new(img_base.outputs["Color"], bsdf.inputs.get("Base Color"))
                     link_to(img)
                     if debug and logger:
                         logger(f'  [mat] resolved {kind} via name="{stem}" -> {os.path.basename(path)}')
@@ -230,7 +248,10 @@ def make_principled_material(name, mat_entries, streams, uv_name, search_dirs, i
         base_candidates,
         img_base,
         "sRGB",
-        lambda img: nt.links.new(img_base.outputs["Color"], bsdf.inputs.get("Base Color"))
+        lambda img: (
+            _force_ignore_alpha(img),
+            nt.links.new(img_base.outputs["Color"], bsdf.inputs.get("Base Color"))
+        )
     )
     if base_name_resolved is None and missing_log is not None and not base_candidates:
         missing_log.append(("albedo", "(no-candidates)", [*search_dirs], name, False))
@@ -248,6 +269,18 @@ def make_principled_material(name, mat_entries, streams, uv_name, search_dirs, i
     )
     if norm_name_resolved is None and missing_log is not None and not norm_candidates:
         missing_log.append(("normal", "(no-candidates)", [*search_dirs], name, False))
+
+    def _stem_sanitized(fname: str) -> str:
+        st = os.path.splitext(fname)[0]
+        st = re.sub(r'([._-])?[DN]$', '', st, flags=re.IGNORECASE)
+        return st
+
+    prefer = base_name_resolved or norm_name_resolved
+    if prefer:
+        try:
+            m.name = _stem_sanitized(prefer)
+        except Exception:
+            pass
 
     params = _extract_params(streams)
     diff_level = float(params.get("difflevel", 1.0)) if isinstance(params.get("difflevel", 1.0), (int,float)) else 1.0
@@ -276,7 +309,8 @@ def make_principled_material(name, mat_entries, streams, uv_name, search_dirs, i
     try: bsdf.inputs["Specular"].default_value = max(0.0, min(1.0, refl_level))
     except Exception: pass
     try:
-        rgh = (2.0 / (spec_level + 2.0)) ** 0.5
+        # rgh = (2.0 / (spec_level + 2.0)) ** 0.5
+        rgh = 2.0
         bsdf.inputs["Roughness"].default_value = max(0.0, min(1.0, rgh))
     except Exception:
         pass

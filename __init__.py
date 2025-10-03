@@ -1,10 +1,12 @@
 bl_info = {
     "name": "Darkspore BMDL Importer",
     "author": "JeanxPereira, foehammer",
-    "version": (1, 0, 0),
+    "version": (1, 0, 1),
     "blender": (4, 5, 0),
     "location": "File > Import > Darkspore (.bmdl)",
-    "description": "Import Darkspore BMDL",
+    "description": "Import Darkspore BMDL files",
+    'warning': '',
+    'tracker_url': "https://github.com/JeanxPereira/BMDL-Importer/issues/",
     "category": "Import-Export",
 }
 
@@ -12,7 +14,7 @@ import bpy
 import os
 import time
 from bpy.types import Operator
-from bpy.props import StringProperty, CollectionProperty, BoolProperty, IntProperty, EnumProperty
+from bpy.props import StringProperty, CollectionProperty, BoolProperty, IntProperty, FloatProperty
 from bpy_extras.io_utils import ImportHelper, orientation_helper
 
 from .bmdl_core import (
@@ -59,15 +61,15 @@ class IMPORT_OT_io_darkspore(Operator, ImportHelper):
     preview_uv: BoolProperty(name="Preview UV (Checker)", default=False)
     preview_uv_index: IntProperty(name="UV Index", default=0, min=0, max=7)
     apply_custom_normals: BoolProperty(name="Apply Custom Normals", default=False)
-    join_renderables: BoolProperty(name="Join Renderables (per mesh)", default=True)
+    join_renderables: BoolProperty(name="Join Renderables (per mesh)", default=False)
     debug_log: BoolProperty(name="Debug Log", default=True)
     dry_run: BoolProperty(name="Dry Run (no mesh build)", default=False)
 
     import_animations_opt: BoolProperty(name="Import Animations", default=True)
 
     import_textures: BoolProperty(name="Import Textures", default=True)
-    use_custom_texture_dir: BoolProperty(name="Use Custom Texture Dir", default=False)
-    textures_dir: StringProperty(name="Custom Texture Dir", subtype="DIR_PATH", default="")
+    use_custom_texture_dir: BoolProperty(name="Use Custom Texture Path", default=False)
+    textures_dir: StringProperty(name="Custom Texture Path", subtype="DIR_PATH", default="")
 
     def execute(self, context):
         paths = []
@@ -81,13 +83,13 @@ class IMPORT_OT_io_darkspore(Operator, ImportHelper):
 
         if self.import_textures and self.use_custom_texture_dir and not self.textures_dir:
             settings = {
-                "convert_axes": self.convert_axes,
-                "axis_forward": self.axis_forward,
-                "axis_up": self.axis_up,
-                "axis_m3": m3,
+                # "convert_axes": self.convert_axes,
+                # "axis_forward": self.axis_forward,
+                # "axis_up": self.axis_up,
+                # "axis_m3": m3,
                 "flip_v": self.flip_v,
                 "preview_uv": self.preview_uv,
-                "preview_uv_index": self.preview_uv_index,
+                #"preview_uv_index": self.preview_uv_index,
                 "apply_custom_normals": self.apply_custom_normals,
                 "join_renderables": self.join_renderables,
                 "debug_log": self.debug_log,
@@ -106,13 +108,13 @@ class IMPORT_OT_io_darkspore(Operator, ImportHelper):
             return {"FINISHED"}
 
         settings = {
-            "convert_axes": self.convert_axes,
-            "axis_forward": self.axis_forward,
-            "axis_up": self.axis_up,
-            "axis_m3": m3,
+            #"convert_axes": self.convert_axes,
+            #"axis_forward": self.axis_forward,
+            #"axis_up": self.axis_up,
+            #"axis_m3": m3,
             "flip_v": self.flip_v,
             "preview_uv": self.preview_uv,
-            "preview_uv_index": self.preview_uv_index,
+            #"preview_uv_index": self.preview_uv_index,
             "apply_custom_normals": self.apply_custom_normals,
             "join_renderables": self.join_renderables,
             "debug_log": self.debug_log,
@@ -156,7 +158,9 @@ def run_import_from_paths(context, paths, settings):
     m3 = settings.get("axis_m3")
     img_cache = {}
     mat_cache = {}
+
     
+
     anim_m3 = make_axis_m3(
         settings.get("convert_axes", False),
         settings.get("axis_forward", "-Z"),
@@ -165,6 +169,8 @@ def run_import_from_paths(context, paths, settings):
     settings["anim_m3"] = anim_m3
 
     for p in paths:
+        file_stem = os.path.splitext(os.path.basename(p))[0]
+
         try:
             with open(p, "rb") as f:
                 d = f.read()
@@ -192,7 +198,7 @@ def run_import_from_paths(context, paths, settings):
                         )
                         bones_count = len(bone_names)
 
-            # --- Materiais / instâncias ---
+            # --- MAterials / Instances ---
             mats_bmdl = ds.materials(mdl["materials_ptr"], mdl["num_materials"]) if mdl["num_materials"] > 0 else []
             insts = ds.instances(mdl["instances_ptr"], mdl["num_instances"])
             rels_by_mesh = {}
@@ -245,7 +251,6 @@ def run_import_from_paths(context, paths, settings):
                         stats.append((isz, fac, vcount, tri_valid, exp_tris, ratio))
                     if not stats:
                         L("  no viable mode")
-                        # escrever log do mesh
                         log_path = os.path.join(os.path.dirname(p), os.path.splitext(os.path.basename(p))[0] + ".darkspore_import.log.txt")
                         with open(log_path, "a", encoding="utf-8") as lf:
                             for line in logs:
@@ -260,7 +265,9 @@ def run_import_from_paths(context, paths, settings):
                     isz, fac, vcount, tri_valid, expect, ratio = choice
                     L(f"  chosen isz={isz} fac={fac} vcount={vcount}")
 
-                    base_name = m["name"] or mdl["name"] or os.path.splitext(os.path.basename(p))[0]
+                    # base_name = m["name"] or mdl["name"] or os.path.splitext(os.path.basename(p))[0]
+                    base_name = file_stem
+
                     global_order = []
                     order_map = {}
                     segments = []
@@ -417,7 +424,9 @@ def run_import_from_paths(context, paths, settings):
                                 mats_index.append(ms)
                             voff += vcount
 
-                        name = m["name"] or mdl["name"] or os.path.splitext(os.path.basename(p))[0]
+                        # name = m["name"] or mdl["name"] or os.path.splitext(os.path.basename(p))[0]
+                        name = file_stem
+
                         mat_objs = None
                         if settings.get("import_textures") and search_dirs and mdl["num_materials"] > 0 and global_order:
                             mat_objs = []
@@ -459,11 +468,10 @@ def run_import_from_paths(context, paths, settings):
                 except Exception as e:
                     print(f"[mesh {mi}] import error for {os.path.basename(p)}:", e)
 
-            # após TODOS os meshes
             if settings.get("import_textures"):
                 write_missing_log(p, missing_records)
 
-            # --- Animações (uma vez por arquivo) ---
+            # --- Animations ---
             try:
                 log_dir = os.path.dirname(p)
                 stem = os.path.splitext(os.path.basename(p))[0]
