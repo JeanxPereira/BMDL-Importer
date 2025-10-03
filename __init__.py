@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Darkspore BMDL Importer",
     "author": "JeanxPereira, foehammer",
-    "version": (0, 8, 7),
+    "version": (1, 0, 0),
     "blender": (4, 5, 0),
     "location": "File > Import > Darkspore (.bmdl)",
     "description": "Import Darkspore BMDL",
