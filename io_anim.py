@@ -33,77 +33,35 @@ class AnimLogger:
     def clear(self):
         self.lines.clear()
 
-def _rot_from_m3(m3):
-    if m3 is None:
-        return None
-    q = m3.to_quaternion()
-    try:
-        q.normalize()
-    except:
-        pass
-    return q
-
-def axis_apply_loc(v, m3):
-    if not isinstance(v, Vector):
-        v = Vector(v)
-    if m3 is None:
-        return (v.x, v.y, v.z)
-    r = m3 @ v
-    return (r.x, r.y, r.z)
-
-def axis_apply_quat(q, m3):
-    qq = Quaternion((q[0], q[1], q[2], q[3]))
-    if m3 is not None:
-        qm = m3.to_quaternion()
-        qq = qm @ qq @ qm.inverted()
-    qq.normalize()
-    return (qq.w, qq.x, qq.y, qq.z)
-
-def axis_apply_scale(s, m3):
-    if not isinstance(s, Vector):
-        s = Vector(s)
-    if m3 is None:
-        return (s.x, s.y, s.z)
-    out = [0.0, 0.0, 0.0]
-    for i in range(3):
-        row = (m3[i][0], m3[i][1], m3[i][2])
-        j = 0
-        if abs(row[1]) > abs(row[j]):
-            j = 1
-        if abs(row[2]) > abs(row[j]):
-            j = 2
-        sign = 1.0 if row[j] >= 0.0 else -1.0
-        val = (s.x, s.y, s.z)[j]
-        out[i] = sign * val
-    return (out[0], out[1], out[2])
-
-def quat_to_euler_xyz(q):
-    e = Quaternion(q).to_euler('XYZ')
-    return (e.x, e.y, e.z)
 
 def ensure_action(arm_obj, name):
+    """Retorna (action, fcurve_container). Em Blender 4.4+ as fcurves vivem
+    num channelbag (slot+layer+strip); no legado, na propria action."""
     if not arm_obj.animation_data:
         arm_obj.animation_data_create()
     act = bpy.data.actions.get(name) or bpy.data.actions.new(name)
-    arm_obj.animation_data.action = act
-    return act
+    ad = arm_obj.animation_data
+    ad.action = act
+    if hasattr(act, "fcurves"):          # Blender <4.4 (legado)
+        return act, act
+    # Sistema novo (slotted action)
+    slot = next((s for s in act.slots if s.target_id_type == 'OBJECT'), None)
+    if slot is None:
+        slot = act.slots.new(id_type='OBJECT', name="Object")
+    try:
+        ad.action_slot = slot
+    except Exception:
+        pass
+    layer = act.layers[0] if len(act.layers) else act.layers.new("Base")
+    strip = layer.strips[0] if len(layer.strips) else layer.strips.new(type='KEYFRAME')
+    cb = strip.channelbag(slot, ensure=True)
+    return act, cb
 
-def ensure_group(act, name):
-    return act.groups.get(name) or act.groups.new(name)
-
-def ensure_fcurve(act, bone, path, idx, logger=None):
-    g = ensure_group(act, bone)
-    for fc in act.fcurves:
+def _ensure_fcurve(cb, path, idx):
+    for fc in cb.fcurves:
         if fc.data_path == path and fc.array_index == idx:
-            if fc.group is None:
-                fc.group = g
-            if logger:
-                logger.log(f'[fcurve] reuse path="{path}" idx={idx} group="{g.name}"')
             return fc
-    fc = act.fcurves.new(path, index=idx, action_group=bone)
-    if logger:
-        logger.log(f'[fcurve] create path="{path}" idx={idx} group="{bone}"')
-    return fc
+    return cb.fcurves.new(path, index=idx)
 
 def write_channel(fc, frames, values):
     n = min(len(frames), len(values))
@@ -123,181 +81,201 @@ def write_channel(fc, frames, values):
     for kp in kps:
         kp.interpolation = "LINEAR"
 
-def map_frames(times, duration, settings):
-    if not times:
-        return []
-    fps = bpy.context.scene.render.fps or 24
-    mode = settings.get("anim_time_mode", "FILE_FRAMES")
-    tmax = max(times)
-    dur = max(float(duration or 0.0), float(tmax or 0.0))
-    if mode == "FILE_FRAMES":
-        s = dur if (tmax <= 1.05 and dur > 1.5) else 1.0
-        return [float(t) * s for t in times]
-    sec = [float(t) * dur for t in times] if (tmax <= 1.05 and dur > 1.5) else [float(t) for t in times]
-    return [t * fps for t in sec]
+
+# ----------------------------------------------------------------------------
+# Bake em forma fechada.
+#
+# Fatos confirmados por engenharia reversa (ver docs/BMDL_ANIMATION.md):
+#   - cada track guarda TRS LOCAL relativo ao pai (medido em 24/24 ossos).
+#   - matriz armazenada e row-major (D3D) -> transpor ao carregar no mathutils.
+#   - local = Translation(T) @ quat.to_matrix() @ Diagonal(S)  (conv. coluna).
+#   - world[osso] = world[pai] @ local[osso].
+#   - quaternion em xyzw -> Quaternion((w,x,y,z)).  (decode ja entrega wxyz)
+#
+# A deformacao do jogo em world-space e  D = world_anim @ inv_bind.
+# No Blender (armature space, com conversao de eixo A = m3 4x4):
+#   pose[osso]  = A @ D @ A^-1 @ matrix_local[osso]
+#   basis[osso] = rel_rest[osso]^-1 @ pose[pai]^-1 @ pose[osso]   (raiz: pai = I)
+# basis e o que vira location / rotation_quaternion / scale do pose bone.
+# Isto independe de como build_armature aproximou a orientacao do rest
+# (head->filho), pois A e matrix_local se cancelam corretamente no rest.
+# ----------------------------------------------------------------------------
+
+def _loadmat(m16):
+    R = Matrix(((m16[0], m16[1], m16[2], m16[3]),
+                (m16[4], m16[5], m16[6], m16[7]),
+                (m16[8], m16[9], m16[10], m16[11]),
+                (m16[12], m16[13], m16[14], m16[15])))
+    return R.transposed()
+
+def _depth(i, parent_idx):
+    d = 0
+    seen = set()
+    while i is not None and i >= 0 and i not in seen:
+        seen.add(i)
+        p = parent_idx.get(i, -1)
+        if p < 0:
+            break
+        i = p
+        d += 1
+    return d
+
+def _interp_vec(times, vals, t, default):
+    n = min(len(times), len(vals))
+    if n <= 0:
+        return Vector(default)
+    if t <= times[0]:
+        return Vector(vals[0])
+    if t >= times[n - 1]:
+        return Vector(vals[n - 1])
+    for i in range(1, n):
+        if t <= times[i]:
+            t0, t1 = times[i - 1], times[i]
+            f = 0.0 if t1 <= t0 else (t - t0) / (t1 - t0)
+            return Vector(vals[i - 1]).lerp(Vector(vals[i]), f)
+    return Vector(vals[n - 1])
+
+def _interp_quat(times, quats, t, default):
+    n = min(len(times), len(quats))
+    if n <= 0:
+        return Quaternion(default)
+    if t <= times[0]:
+        return Quaternion(quats[0])
+    if t >= times[n - 1]:
+        return Quaternion(quats[n - 1])
+    for i in range(1, n):
+        if t <= times[i]:
+            t0, t1 = times[i - 1], times[i]
+            f = 0.0 if t1 <= t0 else (t - t0) / (t1 - t0)
+            return Quaternion(quats[i - 1]).slerp(Quaternion(quats[i]), f)
+    return Quaternion(quats[n - 1])
+
 
 def bake_resolved_anim(arm_obj, anim, settings):
-    act = ensure_action(arm_obj, anim.name)
     alog = settings.get("anim_logger", None)
-    m3 = settings.get("anim_m3") or settings.get("axis_m3")
-    rotmode = "QUATERNION"
-    if alog:
-        alog.log(f'[anim] name="{anim.name}" duration={round(anim.duration,6)} bones={len(anim.bones)} rotmode={rotmode}')
+    game_bones = settings.get("anim_bones") or []
+    if not game_bones:
+        if alog:
+            alog.log(f'[anim] "{anim.name}" SKIP: sem dados de esqueleto (anim_bones)')
+        return
+
+    m3 = settings.get("anim_build_m3")
+    A = m3.to_4x4() if m3 is not None else Matrix.Identity(4)
+    Ainv = A.inverted()
+
+    invb = {}
+    parent_idx = {}
+    idx_name = {}
+    bi_by_name = {}
+    for b in game_bones:
+        i = b["index"]
+        invb[i] = _loadmat(b["inv_bind"])
+        parent_idx[i] = b["parent"]
+        idx_name[i] = b["name"]
+        bi_by_name[b["name"]] = i
+
+    # rest world (game) e TRS local de rest (defaults para canais ausentes)
+    Wg_rest = {}
+    def world_rest(i):
+        if i not in Wg_rest:
+            Wg_rest[i] = invb[i].inverted()
+        return Wg_rest[i]
+    rest_local = {}
+    for i in invb:
+        p = parent_idx[i]
+        wl = world_rest(i)
+        ll = (world_rest(p).inverted() @ wl) if 0 <= p else wl
+        rest_local[i] = ll.decompose()  # (Vector T, Quaternion Q, Vector S)
+
+    # rest do Blender (armature space)
     data_bones = arm_obj.data.bones
-
-    rest_R_chain = {}
-    rest_R_chain_inv = {}
-    rest_t_abs = {}
-    rest_q_local = {}
-    parent_map = {}
-
-    def build_rest_chain(b):
-        if b.name in rest_R_chain:
-            return
-        if b.parent:
-            build_rest_chain(b.parent)
-            parent_map[b.name] = b.parent.name
-            Rp = rest_R_chain[b.parent.name]
-            tp = rest_t_abs[b.parent.name]
-            Rb = b.matrix_local.to_3x3()
-            tb = b.matrix_local.to_translation()
-            Rc = Rp @ Rb
-            tc = tp + (Rp @ tb)
-            rest_R_chain[b.name] = Rc
-            rest_R_chain_inv[b.name] = Rc.inverted()
-            rest_t_abs[b.name] = tc
+    ml = {}
+    rel_rest = {}
+    for db in data_bones:
+        ml[db.name] = db.matrix_local.copy()
+    for db in data_bones:
+        if db.parent:
+            rel_rest[db.name] = db.parent.matrix_local.inverted() @ db.matrix_local
         else:
-            parent_map[b.name] = None
-            Rb = b.matrix_local.to_3x3()
-            tb = b.matrix_local.to_translation()
-            rest_R_chain[b.name] = Rb
-            rest_R_chain_inv[b.name] = Rb.inverted()
-            rest_t_abs[b.name] = tb
-        rest_q_local[b.name] = b.matrix_local.to_quaternion()
+            rel_rest[db.name] = db.matrix_local.copy()
 
-    for b in data_bones:
-        build_rest_chain(b)
+    # tempos de amostragem = uniao dos tempos de todas as tracks
+    tset = set()
+    for bn, chans in anim.timeline.items():
+        for ch, ts in chans.items():
+            for t in ts:
+                tset.add(round(float(t), 6))
+    times = sorted(tset)
+    if not times:
+        times = [0.0]
 
-    for bone, data in anim.bones.items():
-        pb = arm_obj.pose.bones.get(bone) if arm_obj and arm_obj.pose else None
+    order = sorted(invb.keys(), key=lambda i: _depth(i, parent_idx))
+    animated = [bn for bn in anim.bones.keys() if bn in bi_by_name]
+    out = {bn: {"loc": [], "quat": [], "scl": []} for bn in animated}
+
+    for t in times:
+        Wg = {}
+        pose = {}
+        for i in order:
+            name = idx_name[i]
+            T0, Q0, S0 = rest_local[i]
+            data = anim.bones.get(name, {})
+            tl = anim.timeline.get(name, {})
+            if "location" in data:
+                T = _interp_vec(tl.get("location", []), data["location"], t, T0)
+            else:
+                T = Vector(T0)
+            if "rotation_quaternion" in data:
+                Q = _interp_quat(tl.get("rotation_quaternion", []), data["rotation_quaternion"], t, Q0)
+            else:
+                Q = Quaternion(Q0)
+            if "scale" in data:
+                S = _interp_vec(tl.get("scale", []), data["scale"], t, S0)
+            else:
+                S = Vector(S0)
+            local = (Matrix.Translation(T) @ Q.to_matrix().to_4x4()
+                     @ Matrix.Diagonal(Vector((S.x, S.y, S.z, 1.0))))
+            p = parent_idx[i]
+            Wg[i] = (Wg[p] @ local) if (0 <= p and p in Wg) else local
+            D = Wg[i] @ invb[i]
+            pose[i] = A @ D @ Ainv @ ml[name]
+        for name in animated:
+            i = bi_by_name[name]
+            p = parent_idx[i]
+            pm = pose[p] if (0 <= p and p in pose) else Matrix.Identity(4)
+            basis = rel_rest[name].inverted() @ pm.inverted() @ pose[i]
+            loc, q, scl = basis.decompose()
+            out[name]["loc"].append(loc)
+            out[name]["quat"].append(q)
+            out[name]["scl"].append(scl)
+
+    if alog:
+        alog.log(f'[anim] "{anim.name}" dur={round(anim.duration,3)} '
+                 f'bones={len(animated)} samples={len(times)}')
+
+    act, cb = ensure_action(arm_obj, anim.name)
+    for name in animated:
+        be = name.replace('"', '\\"')
+        pb = arm_obj.pose.bones.get(name)
         if pb:
-            pb.rotation_mode = rotmode
-        be = bone.replace('"', '\\"')
+            pb.rotation_mode = "QUATERNION"
+        locs = out[name]["loc"]
+        quats = out[name]["quat"]
+        scls = out[name]["scl"]
+        # continuidade do quaternion entre keyframes
+        for k in range(1, len(quats)):
+            if quats[k].dot(quats[k - 1]) < 0.0:
+                quats[k] = Quaternion((-quats[k].w, -quats[k].x, -quats[k].y, -quats[k].z))
+        path = f'pose.bones["{be}"].location'
+        for c in range(3):
+            write_channel(_ensure_fcurve(cb, path, c), times, [v[c] for v in locs])
+        path = f'pose.bones["{be}"].rotation_quaternion'
+        for c in range(4):
+            write_channel(_ensure_fcurve(cb, path, c), times, [q[c] for q in quats])
+        path = f'pose.bones["{be}"].scale'
+        for c in range(3):
+            write_channel(_ensure_fcurve(cb, path, c), times, [v[c] for v in scls])
 
-        t_loc_raw = anim.timeline.get(bone, {}).get("location", [])
-        t_rot_raw = anim.timeline.get(bone, {}).get("rotation_quaternion", []) or anim.timeline.get(bone, {}).get("rotation_euler", [])
-        t_scl_raw = anim.timeline.get(bone, {}).get("scale", [])
-
-        if "location" in data:
-            tl = map_frames(list(t_loc_raw), anim.duration, settings)
-            if not tl and data["location"]:
-                tl = list(range(len(data["location"])))
-            
-            is_absolute = data.get("location_is_absolute", False)
-            loc = []
-            
-            if is_absolute:
-                parent_name = parent_map.get(bone)
-                t_rest = rest_t_abs.get(bone, Vector((0, 0, 0)))
-                
-                if parent_name is not None:
-                    Rp_inv = rest_R_chain_inv.get(parent_name)
-                    tp_rest = rest_t_abs.get(parent_name, Vector((0, 0, 0)))
-                    
-                    for v in data["location"]:
-                        v_global = Vector(axis_apply_loc(v, m3))
-                        v_relative = v_global - tp_rest
-                        if Rp_inv is not None:
-                            v_local = Rp_inv @ v_relative
-                        else:
-                            v_local = v_relative
-                        loc.append((v_local.x, v_local.y, v_local.z))
-                else:
-                    for v in data["location"]:
-                        v_global = Vector(axis_apply_loc(v, m3))
-                        loc.append((v_global.x, v_global.y, v_global.z))
-            else:
-                Rc_inv = rest_R_chain_inv.get(bone)
-                t_rest = rest_t_abs.get(bone)
-                for v in data["location"]:
-                    la = Vector(axis_apply_loc(v, m3))
-                    d = la - t_rest if t_rest is not None else la
-                    if Rc_inv is not None:
-                        d = Rc_inv @ d
-                    loc.append((d.x, d.y, d.z))
-            
-            path = f'pose.bones["{be}"].location'
-            for i in range(3):
-                fc = ensure_fcurve(act, bone, path, i, alog)
-                write_channel(fc, tl, [v[i] for v in loc])
-
-        if rotmode == "QUATERNION" and ("rotation_quaternion" in data or "rotation_euler" in data):
-            tr = map_frames(list(t_rot_raw), anim.duration, settings)
-            if not tr:
-                nkeys = len(data.get("rotation_quaternion", [])) or len(data.get("rotation_euler", []))
-                if nkeys:
-                    tr = list(range(nkeys))
-            q_rest = rest_q_local.get(bone)
-            rq = []
-            prev = None
-            if "rotation_quaternion" in data:
-                for q in data["rotation_quaternion"]:
-                    qa = Quaternion(axis_apply_quat(q, m3))
-                    dq = (qa.to_matrix() @ q_rest.to_matrix().inverted()).to_quaternion() if q_rest else qa
-                    if prev and (prev.w*dq.w + prev.x*dq.x + prev.y*dq.y + prev.z*dq.z) < 0.0:
-                        dq = Quaternion((-dq.w, -dq.x, -dq.y, -dq.z))
-                    rq.append((dq.w, dq.x, dq.y, dq.z))
-                    prev = dq
-            else:
-                for e0 in data["rotation_euler"]:
-                    qa0 = Euler(e0, 'XYZ').to_quaternion()
-                    qa = Quaternion(axis_apply_quat((qa0.w, qa0.x, qa0.y, qa0.z), m3))
-                    dq = (qa.to_matrix() @ q_rest.to_matrix().inverted()).to_quaternion() if q_rest else qa
-                    if prev and (prev.w*dq.w + prev.x*dq.x + prev.y*dq.y + prev.z*dq.z) < 0.0:
-                        dq = Quaternion((-dq.w, -dq.x, -dq.y, -dq.z))
-                    rq.append((dq.w, dq.x, dq.y, dq.z))
-                    prev = dq
-            path = f'pose.bones["{be}"].rotation_quaternion'
-            for i in range(4):
-                fc = ensure_fcurve(act, bone, path, i, alog)
-                write_channel(fc, tr, [v[i] for v in rq])
-
-        if rotmode == "EULER_XYZ":
-            tr = map_frames(list(t_rot_raw), anim.duration, settings)
-            if not tr:
-                nkeys = len(data.get("rotation_quaternion", [])) or len(data.get("rotation_euler", []))
-                if nkeys:
-                    tr = list(range(nkeys))
-            q_rest = rest_q_local.get(bone)
-            re_vals = []
-            if "rotation_quaternion" in data:
-                for q in data["rotation_quaternion"]:
-                    qa = Quaternion(axis_apply_quat(q, m3))
-                    dq = (qa.to_matrix() @ q_rest.to_matrix().inverted()).to_quaternion() if q_rest else qa
-                    e = dq.to_euler('XYZ')
-                    re_vals.append((e.x, e.y, e.z))
-            else:
-                for e0 in data["rotation_euler"]:
-                    qa0 = Euler(e0, 'XYZ').to_quaternion()
-                    qa = Quaternion(axis_apply_quat((qa0.w, qa0.x, qa0.y, qa0.z), m3))
-                    dq = (qa.to_matrix() @ q_rest.to_matrix().inverted()).to_quaternion() if q_rest else qa
-                    e = dq.to_euler('XYZ')
-                    re_vals.append((e.x, e.y, e.z))
-            if re_vals:
-                path = f'pose.bones["{be}"].rotation_euler'
-                for i in range(3):
-                    fc = ensure_fcurve(act, bone, path, i, alog)
-                    write_channel(fc, tr, [v[i] for v in re_vals])
-
-        if "scale" in data:
-            ts = map_frames(list(t_scl_raw), anim.duration, settings)
-            if not ts and data["scale"]:
-                ts = list(range(len(data["scale"])))
-            scl = [axis_apply_scale(v, m3) for v in data["scale"]]
-            path = f'pose.bones["{be}"].scale'
-            for i in range(3):
-                fc = ensure_fcurve(act, bone, path, i, alog)
-                write_channel(fc, ts, [v[i] for v in scl])
 
 def import_animations(ds, tb, arm_obj, bone_names, settings):
     alog = settings.get("anim_logger", None)
@@ -309,8 +287,7 @@ def import_animations(ds, tb, arm_obj, bone_names, settings):
         w0 = alog.warns if alog else 0
         anim = _decode_animation(ds, h, raw, bone_names, settings)
         w1 = alog.warns if alog else 0
-        wdelta = max(0, w1 - w0)
-        total_warns += wdelta
+        total_warns += max(0, w1 - w0)
         if anim and anim.bones:
             bake_resolved_anim(arm_obj, anim, settings)
             ok += 1

@@ -199,6 +199,10 @@ def run_import_from_paths(context, paths, settings):
                             m3
                         )
                         bones_count = len(bone_names)
+                        # dados crus do esqueleto (inv_bind/parent) + m3 usado no rest,
+                        # necessarios para o bake de animacao em forma fechada
+                        settings["anim_bones"] = bones
+                        settings["anim_build_m3"] = m3
 
             # --- MAterials / Instances ---
             mats_bmdl = ds.materials(mdl["materials_ptr"], mdl["num_materials"]) if mdl["num_materials"] > 0 else []
