@@ -625,7 +625,6 @@ def _decode_animation(ds, header, raw, bone_names, settings):
             vals = [tuple(bv[j * 3:(j + 1) * 3]) for j in range(nn)]
             bt = bt[:nn]
             bones[bname]["location"] = vals
-            bones[bname]["location_is_absolute"] = True
             timeline[bname]["location"] = bt
         
         elif r.category == 2:
