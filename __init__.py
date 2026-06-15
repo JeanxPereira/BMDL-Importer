@@ -25,6 +25,8 @@ from .bmdl_core import (
 
 from .io_mesh import (
     build_mesh,
+)
+from .io_material import (
     ensure_empty_material,
     ensure_uv_debug_material,
     make_principled_material,
@@ -61,7 +63,7 @@ class IMPORT_OT_io_darkspore(Operator, ImportHelper):
     preview_uv: BoolProperty(name="Preview UV (Checker)", default=False)
     preview_uv_index: IntProperty(name="UV Index", default=0, min=0, max=7)
     apply_custom_normals: BoolProperty(name="Apply Custom Normals", default=False)
-    join_renderables: BoolProperty(name="Join Renderables (per mesh)", default=False)
+    join_renderables: BoolProperty(name="Join Renderables (per mesh)", default=True)
     debug_log: BoolProperty(name="Debug Log", default=True)
     dry_run: BoolProperty(name="Dry Run (no mesh build)", default=False)
 
