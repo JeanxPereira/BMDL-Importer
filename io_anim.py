@@ -35,16 +35,16 @@ class AnimLogger:
 
 
 def ensure_action(arm_obj, name):
-    """Retorna (action, fcurve_container). Em Blender 4.4+ as fcurves vivem
-    num channelbag (slot+layer+strip); no legado, na propria action."""
+    """Returns (action, fcurve_container). In Blender 4.4+ the fcurves live in a
+    channelbag (slot+layer+strip); in the legacy system, on the action itself."""
     if not arm_obj.animation_data:
         arm_obj.animation_data_create()
     act = bpy.data.actions.get(name) or bpy.data.actions.new(name)
     ad = arm_obj.animation_data
     ad.action = act
-    if hasattr(act, "fcurves"):          # Blender <4.4 (legado)
+    if hasattr(act, "fcurves"):          # Blender <4.4 (legacy)
         return act, act
-    # Sistema novo (slotted action)
+    # New system (slotted action)
     slot = next((s for s in act.slots if s.target_id_type == 'OBJECT'), None)
     if slot is None:
         slot = act.slots.new(id_type='OBJECT', name="Object")
@@ -83,22 +83,22 @@ def write_channel(fc, frames, values):
 
 
 # ----------------------------------------------------------------------------
-# Bake em forma fechada.
+# Closed-form bake.
 #
-# Fatos confirmados por engenharia reversa (ver docs/BMDL_ANIMATION.md):
-#   - cada track guarda TRS LOCAL relativo ao pai (medido em 24/24 ossos).
-#   - matriz armazenada e row-major (D3D) -> transpor ao carregar no mathutils.
-#   - local = Translation(T) @ quat.to_matrix() @ Diagonal(S)  (conv. coluna).
-#   - world[osso] = world[pai] @ local[osso].
-#   - quaternion em xyzw -> Quaternion((w,x,y,z)).  (decode ja entrega wxyz)
+# Facts confirmed by reverse engineering (see docs/BMDL_ANIMATION.md):
+#   - each track stores parent-relative LOCAL TRS (measured on 24/24 bones).
+#   - the stored matrix is row-major (D3D) -> transpose when loading into mathutils.
+#   - local = Translation(T) @ quat.to_matrix() @ Diagonal(S)  (column convention).
+#   - world[bone] = world[parent] @ local[bone].
+#   - quaternion is xyzw -> Quaternion((w,x,y,z)).  (decode already returns wxyz)
 #
-# A deformacao do jogo em world-space e  D = world_anim @ inv_bind.
-# No Blender (armature space, com conversao de eixo A = m3 4x4):
-#   pose[osso]  = A @ D @ A^-1 @ matrix_local[osso]
-#   basis[osso] = rel_rest[osso]^-1 @ pose[pai]^-1 @ pose[osso]   (raiz: pai = I)
-# basis e o que vira location / rotation_quaternion / scale do pose bone.
-# Isto independe de como build_armature aproximou a orientacao do rest
-# (head->filho), pois A e matrix_local se cancelam corretamente no rest.
+# The game's world-space deformation is  D = world_anim @ inv_bind.
+# In Blender (armature space, with axis conversion A = m3 4x4):
+#   pose[bone]  = A @ D @ A^-1 @ matrix_local[bone]
+#   basis[bone] = rel_rest[bone]^-1 @ pose[parent]^-1 @ pose[bone]   (root: parent = I)
+# basis is what becomes location / rotation_quaternion / scale on the pose bone.
+# This is independent of how build_armature approximated the rest orientation
+# (head->child), because A and matrix_local cancel out at rest.
 # ----------------------------------------------------------------------------
 
 def _loadmat(m16):
@@ -156,7 +156,7 @@ def bake_resolved_anim(arm_obj, anim, settings):
     game_bones = settings.get("anim_bones") or []
     if not game_bones:
         if alog:
-            alog.log(f'[anim] "{anim.name}" SKIP: sem dados de esqueleto (anim_bones)')
+            alog.log(f'[anim] "{anim.name}" SKIP: no skeleton data (anim_bones)')
         return
 
     m3 = settings.get("anim_build_m3")
@@ -199,7 +199,7 @@ def bake_resolved_anim(arm_obj, anim, settings):
         else:
             rel_rest[db.name] = db.matrix_local.copy()
 
-    # tempos de amostragem = uniao dos tempos de todas as tracks
+    # sample times = union of all track times
     tset = set()
     for bn, chans in anim.timeline.items():
         for ch, ts in chans.items():
@@ -262,7 +262,7 @@ def bake_resolved_anim(arm_obj, anim, settings):
         locs = out[name]["loc"]
         quats = out[name]["quat"]
         scls = out[name]["scl"]
-        # continuidade do quaternion entre keyframes
+        # quaternion continuity between keyframes
         for k in range(1, len(quats)):
             if quats[k].dot(quats[k - 1]) < 0.0:
                 quats[k] = Quaternion((-quats[k].w, -quats[k].x, -quats[k].y, -quats[k].z))

@@ -30,6 +30,7 @@ from .io_material import (
     ensure_empty_material,
     ensure_uv_debug_material,
     make_principled_material,
+    make_material,
     search_roots_for,
     write_missing_log,
 )
@@ -199,8 +200,8 @@ def run_import_from_paths(context, paths, settings):
                             m3
                         )
                         bones_count = len(bone_names)
-                        # dados crus do esqueleto (inv_bind/parent) + m3 usado no rest,
-                        # necessarios para o bake de animacao em forma fechada
+                        # raw skeleton data (inv_bind/parent) + the m3 used for the rest pose,
+                        # needed for the closed-form animation bake
                         settings["anim_bones"] = bones
                         settings["anim_build_m3"] = m3
 
@@ -374,17 +375,16 @@ def run_import_from_paths(context, paths, settings):
                             if 0 <= r["imat"] < len(mats_bmdl):
                                 info = mats_bmdl[r["imat"]]
                                 uv_name = f"UV{min(uvsets.keys())}" if uvsets else None
-                                stems_b = [e.get("value") for e in info.get("textures", []) if (e.get("key") or "").lower() in base_keys and (e.get("value") or "")]
-                                stems_n = [e.get("value") for e in info.get("textures", []) if (e.get("key") or "").lower() in norm_keys and (e.get("value") or "")]
-                                ov_b = stems_b[ri] if stems_b and ri < len(stems_b) else (stems_b[ri % len(stems_b)] if stems_b else None)
-                                ov_n = stems_n[ri] if stems_n and ri < len(stems_n) else (stems_n[ri % len(stems_n)] if stems_n else None)
-                                disp = (info.get("name") or "MAT") + f"_{ri:02d}"
-                                cid = f"{os.path.abspath(p)}|slot|{ri}"
-                                mat_obj = make_principled_material(
-                                    disp, info.get("textures", []), info.get("streams", []),
+                                # material identified by imat (NOT by ri): renderables/meshes
+                                # with the same imat share one material; distinct imat => distinct material.
+                                disp = (info.get("name") or "MAT") + f"_{r['imat']:02d}"
+                                cid = f"{os.path.abspath(p)}|mat|{r['imat']}"
+                                mat_obj = make_material(
+                                    disp, info.get("shader") or info.get("name"), info.get("params", {}),
+                                    info.get("textures", []), info.get("streams", []),
                                     uv_name, search_dirs, img_cache, mat_cache, missing_records, debug,
                                     mesh_name=m.get("name"), cache_id=cid,
-                                    override_base=ov_b, override_norm=ov_n, logger=L,
+                                    override_base=None, override_norm=None, logger=L,
                                 )
                                 mat_objs = [mat_obj]
                             else:
@@ -441,14 +441,15 @@ def run_import_from_paths(context, paths, settings):
                                 r = rels[ri]
                                 if 0 <= r["imat"] < len(mats_bmdl):
                                     info = mats_bmdl[r["imat"]]
-                                    disp = (info.get("name") or "MAT") + f"_{ri:02d}"
-                                    cid = f"{os.path.abspath(p)}|slot|{ri}"
+                                    disp = (info.get("name") or "MAT") + f"_{r['imat']:02d}"
+                                    cid = f"{os.path.abspath(p)}|mat|{r['imat']}"
                                     mat_objs.append(
-                                        make_principled_material(
-                                            disp, info.get("textures", []), info.get("streams", []),
+                                        make_material(
+                                            disp, info.get("shader") or info.get("name"), info.get("params", {}),
+                                            info.get("textures", []), info.get("streams", []),
                                             uv_name, search_dirs, img_cache, mat_cache, missing_records, debug,
                                             mesh_name=m.get("name"), cache_id=cid,
-                                            override_base=slot_stem_base.get(ri), override_norm=slot_stem_norm.get(ri), logger=L,
+                                            override_base=None, override_norm=None, logger=L,
                                         )
                                     )
                                 else:

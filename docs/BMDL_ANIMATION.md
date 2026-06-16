@@ -1,143 +1,140 @@
-# BMDL — Formato de Animação (engenharia reversa)
+# BMDL — Animation format (reverse engineering)
 
-> Documento de referência para o subsistema de animação do BMDL Importer.
-> Fontes: (1) bytes reais de `creatureeditor_el_anime_arm.bmdl`, (2) decompilação do
-> `Darkspore.exe` via Ghidra. Cada afirmação está marcada como **[medido]** (verificado
-> nos bytes do arquivo) ou **[binário]** (confirmado no código do jogo).
+Reference for the BMDL Importer animation subsystem.
+Sources: (1) raw bytes of `creatureeditor_el_anime_arm.bmdl`, (2) `Darkspore.exe` decompiled in
+Ghidra. Each statement is tagged **[measured]** (verified against file bytes) or **[binary]**
+(confirmed in game code).
 
 ---
 
-## 1. Container BMDL v2
+## 1. BMDL v2 container
 
-O arquivo é um *graph* serializado: um blob com ponteiros **relativos a `base`** que o
-jogo "reloca" (converte para absolutos) ao carregar.
+The file is a serialized *graph*: a blob with pointers **relative to `base`** that the game
+"relocates" (converts to absolute) at load time.
 
 ```mermaid
 flowchart TD
-    A["Cabeçalho do arquivo (offset 0)"] --> B["graph blob (a partir de 'base')"]
-    B --> R["tbmdl root (4 campos)"]
-    R --> M["model_ptr  -> geometria"]
-    R --> S["skeleton_ptr -> esqueleto"]
+    A["File header (offset 0)"] --> B["graph blob (from 'base')"]
+    B --> R["tbmdl root (4 fields)"]
+    R --> M["model_ptr  -> geometry"]
+    R --> S["skeleton_ptr -> skeleton"]
     R --> N["num_anims (int)"]
-    R --> P["anims_ptr -> array de animacoes"]
+    R --> P["anims_ptr -> animation array"]
 
-    subgraph Header["Cabecalho (20 bytes)"]
+    subgraph Header["Header (20 bytes)"]
       H0["+0  u32 = 1            (word0)"]
       H4["+4  'bmdl' (0x6c646d62)"]
-      H8["+8  u32 = 2            (versao)"]
-      H12["+12 u32 base          (offset do graph)"]
+      H8["+8  u32 = 2            (version)"]
+      H12["+12 u32 base          (graph offset)"]
       H16["+16 u32 graph_size"]
     end
 ```
 
-**[binário]** `BinaryModel::ReadResourceModel @ 004a9220` valida exatamente
-`word0==1`, `word1=="bmdl"`, `word2==2`, chama `BinaryBuffer::Relocate`, e então
-`src = *pRelocatedBase`. Os 4 campos da raiz são lidos como
-`pRelocatedBase[0..3]` = **model, skeleton, num_anims, anims**.
-A condição `if (skeleton==0 && anims==0) free(animBuffer)` confirma que `[1]=skeleton`
-e `[3]=anims`.
+**[binary]** `BinaryModel::ReadResourceModel @ 004a9220` checks exactly `word0==1`,
+`word1=="bmdl"`, `word2==2`, calls `BinaryBuffer::Relocate`, then `src = *pRelocatedBase`. The four
+root fields are read as `pRelocatedBase[0..3]` = **model, skeleton, num_anims, anims**. The branch
+`if (skeleton==0 && anims==0) free(animBuffer)` confirms `[1]=skeleton` and `[3]=anims`.
 
-**[medido]** Em `creatureeditor_el_anime_arm.bmdl`: `base=3216`, `graph_size=866660`,
-root = `[16, 836620, 4, 838748]` → 4 animações (`idle`, `activate`, `up`, `retract`).
+**[measured]** In `creatureeditor_el_anime_arm.bmdl`: `base=3216`, `graph_size=866660`,
+root = `[16, 836620, 4, 838748]` → 4 animations (`idle`, `activate`, `up`, `retract`).
 
-> ⚠️ **Importante:** `ReadResourceModel` copia/sobe a *geometria* para a GPU, mas
-> **esqueleto e animações ficam no buffer relocado** (`model+0x1c`, `model+0x24`,
-> buffer em `model+0x30`) e são consumidos depois pelo runtime de animação. Por isso o
-> addon lê essas seções direto do arquivo — está correto fazer assim.
+> ⚠️ **Important:** `ReadResourceModel` copies/uploads the *geometry* to the GPU, but the
+> **skeleton and animations stay in the relocated buffer** (`model+0x1c`, `model+0x24`, buffer at
+> `model+0x30`) and are consumed later by the runtime animation system. That is why the addon reads
+> these sections straight from the file — which is correct.
 
 ---
 
-## 2. Layout das estruturas (todos os offsets confirmados)
+## 2. Structure layout (all offsets confirmed)
 
 ### tbmdl root
-| off | tipo | campo |
+| off | type | field |
 |----:|------|-------|
 | +0  | u32  | model_ptr |
 | +4  | u32  | skeleton_ptr |
 | +8  | i32  | num_anims |
 | +12 | u32  | anims_ptr |
 
-### Skeleton  *(stride do bone = 80 bytes)*
-| off | tipo | campo |
+### Skeleton  *(bone stride = 80 bytes)*
+| off | type | field |
 |----:|------|-------|
 | +0  | i32  | num_bones |
 | +4  | u32  | bones_ptr |
 
 ### Bone (80 bytes)
-| off | tipo      | campo |
+| off | type      | field |
 |----:|-----------|-------|
 | +0  | u32       | name_ptr |
-| +4  | u32       | name_hash (FNV-1a) |
-| +8  | i32       | parent_index (-1 = raiz) |
+| +4  | u32       | name_hash (FNV-1) |
+| +8  | i32       | parent_index (-1 = root) |
 | +12 | u32       | pad |
-| +16 | float[16] | **inverse-bind matrix** (model-space, row-major D3D; translação em m[12..14]) |
+| +16 | float[16] | **inverse-bind matrix** (model-space, D3D row-major; translation in m[12..14]) |
 
-**[medido]** Sob rotação identidade, `world_pos = -translação(inverse_bind)`. Ex.:
-`head_rota` inverse-bind tz = −4.265 → posição world z = +4.265.
+**[measured]** Under identity rotation, `world_pos = -translation(inverse_bind)`. E.g.
+`head_rota` inverse-bind tz = −4.265 → world z = +4.265.
 
 ### Anim header (20 bytes)
-| off | tipo | campo |
+| off | type | field |
 |----:|------|-------|
 | +0  | u32  | name_ptr |
 | +4  | u32  | name_hash |
-| +8  | f32  | **duration** (em *frames*; idle=799) |
+| +8  | f32  | **duration** (in *frames*; idle = 799) |
 | +12 | u32  | num_tracks |
 | +16 | u32  | tracks_ptr |
 
-### Track (20 bytes)  ← **AQUI ESTÁ O BUG PRINCIPAL DE PARSE**
-| off | tipo | campo | addon atual |
-|----:|------|-------|-------------|
-| +0  | i32  | bone_index | ok |
-| +4  | u32  | category (1=POS, 2=ROT, 3=SCALE) | ok |
-| +8  | u32  | **num_keys** | ❌ rotulado como `flags` e **ignorado** |
-| +12 | u32  | times_ptr  (→ `num_keys` floats) | ok |
-| +16 | u32  | values_ptr (→ `num_keys * dim` floats) | ok |
+### Track (20 bytes)
+| off | type | field |
+|----:|------|-------|
+| +0  | i32  | bone_index |
+| +4  | u32  | category (1=POS, 2=ROT, 3=SCALE) |
+| +8  | u32  | **num_keys** (the old code mislabeled this `flags`) |
+| +12 | u32  | times_ptr  (→ `num_keys` floats) |
+| +16 | u32  | values_ptr (→ `num_keys * dim` floats) |
 
 `dim`: POS=3, ROT=4 (quaternion **xyzw**), SCALE=3.
 
-**[medido]** Em 70 tracks × 4 anims, `num_keys` (campo +8) == `(values_ptr - times_ptr)/4`
-em **todas**. O addon deriva `n` pela subtração de ponteiros e por isso *acerta o número
-de keys por coincidência aritmética* — mas o campo correto/explícito é o +8.
+**[measured]** Across 70 tracks × 4 anims, `num_keys` (field +8) == `(values_ptr - times_ptr)/4` in
+**all** of them. Deriving `n` from the pointer difference happens to match, but the explicit field is +8.
 
 ```mermaid
 flowchart LR
     AH["Anim header"] -->|tracks_ptr| TR["Track[i] (20B)"]
     TR -->|times_ptr| TT["times: num_keys floats"]
     TR -->|values_ptr| TV["values: num_keys * dim floats"]
-    TT --- note["times e values sao contiguos;<br/>a proxima track comeca logo apos values"]
+    TT --- note["times and values are contiguous;<br/>the next track starts right after values"]
 ```
 
 ---
 
-## 3. Semântica dos valores — **LOCAL, relativo ao pai**  [medido]
+## 3. Value semantics — **LOCAL, parent-relative**  [measured]
 
-Teste cruzando, para cada osso, `POS[0]` da track contra a translação **world**
-(derivada da inverse-bind) e a **local** (`world − world_pai`):
+For each bone, cross-check track `POS[0]` against the **world** translation (derived from the
+inverse-bind) and the **local** one (`world − parent_world`):
 
-| osso | pai | world | local (w−wp) | POS[0] track | bate |
-|------|-----|-------|--------------|--------------|------|
-| head_rota | Root | (0,0,4.265) | (0,0,4.265) | (0,0,4.265) | ambos* |
+| bone | parent | world | local (w−wp) | POS[0] track | match |
+|------|--------|-------|--------------|--------------|-------|
+| head_rota | Root | (0,0,4.265) | (0,0,4.265) | (0,0,4.265) | both* |
 | L_arm | arm_rota | (−1.422,0,5.873) | (−1.422,0,−0.075) | (−1.422,0,−0.075) | **LOCAL** |
 | Lerbow | L_arm | (−2.501,0,6.577) | (−1.080,0,0.703) | (−1.080,0,0.703) | **LOCAL** |
 | L_body | Lerbow | (−2.495,−0.168,3.821) | (0.006,−0.168,−2.756) | (0.006,−0.168,−2.756) | **LOCAL** |
 | … (24/24) | | | | | **LOCAL** |
 
-\* ossos perto da raiz coincidem porque o pai está na origem (local == world).
-Todos os ossos com pai fora da origem batem **somente** com LOCAL.
+\* bones near the root match both because the parent is at the origin (local == world). Every bone
+whose parent is off-origin matches **only** LOCAL.
 
-> **Conclusão:** as tracks armazenam **TRS local relativo ao pai** (animação hierárquica
-> padrão). No rest, `POS == translação local de bind`, `ROT == identidade`, `SCALE == 1`.
-> Quaternion em ordem **xyzw** (w por último): ex. `head_rota` ROT = `(0,0,0.1005,0.9949)`
-> = ~11.5° em Z — coerente; em wxyz seria 180° (absurdo).
+> **Conclusion:** tracks store **parent-relative local TRS** (standard hierarchical animation). At
+> rest, `POS == local bind translation`, `ROT == identity`, `SCALE == 1`. Quaternion order is
+> **xyzw** (w last): e.g. `head_rota` ROT = `(0,0,0.1005,0.9949)` ≈ 11.5° about Z — consistent; as
+> wxyz it would be 180° (nonsense).
 
 ---
 
-## 4. Mapa das funções no Ghidra (Darkspore.exe)
+## 4. Ghidra function map (Darkspore.exe)
 
 ```mermaid
 flowchart TD
-    LA["SP_RenderAsset::LoadAsset @ 004aeea0<br/>(dispatch por asset-type hash)"]
-    LA -->|0x72047de2| RRM["BinaryModel::ReadResourceModel @ 004a9220<br/>** carrega bmdl v2 (NOSSO arquivo) **"]
+    LA["SP_RenderAsset::LoadAsset @ 004aeea0<br/>(dispatch by asset-type hash)"]
+    LA -->|0x72047de2| RRM["BinaryModel::ReadResourceModel @ 004a9220<br/>** loads bmdl v2 (OUR file) **"]
     LA -->|0xe6bce5| LGM["SP_RenderAsset::LoadGameModelVersioned @ 004aee10"]
     LA -->|0x2f4e681c| RML["SP_RenderModel::Load"]
     LA -->|0x2f7d0004| RMS["SP_RenderModel::LoadStrided"]
@@ -145,76 +142,67 @@ flowchart TD
     LA -->|0x2cb4f2f| LSD["SP_RenderAsset::LoadSkinData @ 004a4850"]
     LA -->|0x2f4e681b| LP["LoadPrefab"]
 
-    RRM --> REL["BinaryBuffer::Relocate (fixup de ponteiros)"]
+    RRM --> REL["BinaryBuffer::Relocate (pointer fixup)"]
     RRM --> LB["LayoutBuilder::AddField/ResolvePointers"]
-    RRM -.deixa intactos.-> SKA["skeleton + anims no buffer relocado"]
+    RRM -.leaves intact.-> SKA["skeleton + anims in relocated buffer"]
 
-    LGM --> S1["FUN_004a47b0 (geometria)"]
-    LGM --> S2["FUN_004ae430 (IB/VB/decl/materiais)"]
+    LGM --> S1["FUN_004a47b0 (geometry)"]
+    LGM --> S2["FUN_004ae430 (IB/VB/decl/materials)"]
 
-    AL["SP_AnimLoader::LoadAnimAsset @ 004aa650<br/>(.anim standalone -> AnimationManager)"]
-    AD["AssetData::cAnimatorData @ 00f8ad00<br/>(schema .animator: rate/delay/track)"]
+    AL["SP_AnimLoader::LoadAnimAsset @ 004aa650<br/>(standalone .anim -> AnimationManager)"]
+    AD["AssetData::cAnimatorData @ 00f8ad00<br/>(.animator schema: rate/delay/track)"]
 ```
 
-**Funções já nomeadas (confirmadas):**
-- `SP_RenderAsset::LoadAsset @ 004aeea0` — dispatcher por hash de tipo de asset.
-- `BinaryModel::ReadResourceModel @ 004a9220` — **loader do bmdl v2** (nosso caso).
-- `SP_RenderAsset::LoadGameModelVersioned @ 004aee10` — formato versionado (v8/v9), streamed.
-- `SP_AnimLoader::LoadAnimAsset @ 004aa650` — carrega `.anim` separado e registra no `AnimationManager`.
-- `AssetData::cAnimatorData @ 00f8ad00` — descritor de reflexão do asset `.animator` (gameplay).
+**Named functions (confirmed):**
+- `SP_RenderAsset::LoadAsset @ 004aeea0` — dispatcher by asset-type hash.
+- `BinaryModel::ReadResourceModel @ 004a9220` — **bmdl v2 loader** (our case).
+- `SP_RenderAsset::LoadGameModelVersioned @ 004aee10` — versioned (v8/v9) streamed format.
+- `SP_AnimLoader::LoadAnimAsset @ 004aa650` — loads a standalone `.anim` and registers it in `AnimationManager`.
+- `AssetData::cAnimatorData @ 00f8ad00` — reflection descriptor for the `.animator` (gameplay) asset.
 
-**Ainda não localizado:** o *sampler* runtime que interpola `times/values` e compõe o TRS
-local em matrizes de osso (provável em `AnimationManager` / sistema de render de criaturas).
-Não necessário para o parse — a semântica já está medida acima — mas útil para confirmar a
-ordem exata de composição numa próxima rodada.
+Ghidra structs defined: `bmdl_TbmdlRoot`, `bmdl_Skeleton`, `bmdl_Bone`, `bmdl_AnimHeader`,
+`bmdl_AnimTrack` (plate comment on `ReadResourceModel @ 004a9220`).
+
+**Not located:** the runtime *sampler* that interpolates `times/values` and composes the local TRS
+into bone matrices (likely in `AnimationManager` / creature render). Not needed for the parse — the
+semantics are measured above — but it would confirm the exact composition order.
 
 ---
 
-## 5. Diagnóstico da quebra no addon
+## 5. Root causes of the broken animation (now fixed)
 
-```mermaid
-flowchart TD
-    F["Arquivo BMDL"] --> P["_decode_animation (bmdl_core.py)"]
-    P -->|"location_is_absolute = True (L628)"| BUG1{{"❌ trata POS como ABSOLUTO model-space"}}
-    BUG1 --> BAKE["bake_resolved_anim (io_anim.py)"]
-    BAKE -->|"converte 'global'->local:<br/>subtrai world do pai, aplica Rp_inv"| BUG2{{"❌ destroi as posicoes (ja eram locais)"}}
-    P -->|"map_frames heuristico (L126)"| BUG3{{"⚠️ escala de tempo por palpite"}}
-    P -->|"campo +8 = num_keys lido como 'flags'"| BUG4{{"⚠️ fragil; n derivado por subtracao"}}
-```
+| # | root cause | evidence |
+|---|-----------|----------|
+| 0 | **Blender 5.1 removed `Action.groups` and `Action.fcurves`** (new slotted system: slot+layer+strip+channelbag). The addon used `act.groups`/`act.fcurves.new` → `AttributeError`, so **no** animation was created at all | crash reproduced in Blender |
+| 1 | POS/ROT/SCALE are **parent-relative local**, but the addon treated POS as absolute and did a global→local conversion | **[measured]** 24/24 bones match LOCAL |
+| 2 | Track field `+8` is **num_keys**, not `flags` | **[measured]** 280 tracks |
+| 3 | `map_frames` applied a heuristic time scale | times and duration are already in the **same unit (frames)** |
+| 4 | Quaternion order is xyzw | **[measured]** |
 
-| # | Causa-raiz | Onde | Evidência |
-|---|-----------|------|-----------|
-| 0 | **Blender 5.1 removeu `Action.groups` e `Action.fcurves`** (novo sistema slotted: slot+layer+strip+channelbag). O addon usava `act.groups`/`act.fcurves.new` → `AttributeError`, **nenhuma** animação era criada | `io_anim.py` (ensure_group/ensure_fcurve antigos) | crash reproduzido no Blender |
-| 1 | POS/ROT/SCALE são **locais (relativos ao pai)**, mas o addon marcava POS como absoluto e fazia conversão global→local | `bmdl_core.py:628`, `io_anim.py` (bake antigo) | **[medido]** 24/24 ossos batem LOCAL |
-| 2 | O campo `+8` da track é **num_keys**, não `flags` | `bmdl_core.py` (`RawTrack.flags`) | **[medido]** 280 tracks |
-| 3 | `map_frames` aplicava escala de tempo heurística | `io_anim.py` (antigo) | times e duration já estão na **mesma unidade (frames)** |
-| 4 | Ordem do quaternion configurável, default xyzw | `bmdl_core.py:638` | **[medido]** xyzw correto |
-
-### ✅ Correção implementada e verificada
-Reescrito `io_anim.py` (bake em forma fechada) + plumbing em `__init__.py` (passa
-`anim_bones`/`anim_build_m3`). Math por frame:
+### ✅ Fix (implemented and verified)
+`io_anim.py` rewritten with a closed-form bake; `__init__.py` passes `anim_bones`/`anim_build_m3`.
+Per-frame math:
 
 ```
-local        = Translation(T) @ quat(wxyz).to_matrix() @ Diagonal(S)   # local->pai
-world[osso]  = world[pai] @ local[osso]                                # cadeia
-D            = world[osso] @ inv_bind[osso]                             # deformacao (I no rest)
-pose[osso]   = A @ D @ A^-1 @ matrix_local[osso]    (A = m3 4x4 do build_armature)
-basis[osso]  = rel_rest[osso]^-1 @ pose[pai]^-1 @ pose[osso]
+local        = Translation(T) @ quat(wxyz).to_matrix() @ Diagonal(S)   # local -> parent
+world[bone]  = world[parent] @ local[bone]                             # chain
+D            = world[bone] @ inv_bind[bone]                            # deformation (identity at rest)
+pose[bone]   = A @ D @ A^-1 @ matrix_local[bone]    (A = the m3 4x4 used by build_armature)
+basis[bone]  = rel_rest[bone]^-1 @ pose[parent]^-1 @ pose[bone]
 # basis.decompose() -> location / rotation_quaternion / scale (fcurves via channelbag)
 ```
 
-**Verificação (Blender 5.1, código real do addon):**
-- Frame 0: deformação de todos os ossos == identidade (erro ~2e-6) → rest correto.
-- Frames 340/500/799: `pb.matrix @ matrix_local^-1` == `A @ D_game @ A^-1` (erro ~2e-6).
-- `head_rota` @340 deforma 19.73° em Z == `2·asin(0.1713)` da track. ✓
-- 4 animações importadas; 240 fcurves no `idle`.
+**Verification (Blender 5.1, real addon code):**
+- Frame 0: every bone's deformation == identity (error ~2e-6) → correct rest.
+- Frames 340/500/799: `pb.matrix @ matrix_local^-1` == `A @ D_game @ A^-1` (error ~2e-6).
+- `head_rota` @340 deforms 19.73° about Z == `2·asin(0.1713)` from the track. ✓
+- 4 animations imported; 240 fcurves in `idle`.
 
-A forma fechada é **robusta à orientação aproximada do rest** que `build_armature` gera
-(bone aponta-para-filho), pois `A` e `matrix_local` se cancelam no rest.
+The closed form is **robust to the approximate rest orientation** `build_armature` produces
+(bone points to child), because `A` and `matrix_local` cancel at rest.
 
 ---
 
-## 6. Scripts de verificação
-Dumps standalone usados (na pasta do arquivo de teste):
-`_dump_anim.py` (headers/tracks), `_dump_anim2.py` (matrizes + valores),
-`_dump_anim3.py` (teste local-vs-absoluto em todos os ossos).
+## 6. Verification scripts
+Standalone dumps (next to the test file): `_dump_anim.py` (headers/tracks),
+`_dump_anim2.py` (matrices + values), `_dump_anim3.py` (local-vs-absolute test over all bones).

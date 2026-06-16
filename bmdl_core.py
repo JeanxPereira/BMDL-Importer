@@ -229,6 +229,32 @@ class BMDLv2:
             out.append((name, val))
         return out
 
+    def _mat_params(self, params_ptr, n, floats_ptr, num_floats):
+        # bmdl_MatParam (16B): {name_ptr, name_hash, float_offset, dimension}
+        # -> slice [float_offset:float_offset+dim] of the custom_floats constant buffer.
+        floats = []
+        if floats_ptr and num_floats > 0:
+            for i in range(num_floats):
+                fo = self.base + floats_ptr + i * 4
+                if fo + 4 > self.base + self.graph_size:
+                    break
+                floats.append(struct.unpack_from("<f", self.d, fo)[0])
+        out = {}
+        if params_ptr and n > 0:
+            for i in range(n):
+                o = self.base + params_ptr + i * 16
+                if o + 16 > self.base + self.graph_size:
+                    break
+                np = _u32(self.d, o + 0)
+                off = _u32(self.d, o + 8)
+                dim = _u32(self.d, o + 12)
+                name = _cstr(self.d, self.base + np) if np and np < self.graph_size else ""
+                if not name or off + dim > len(floats):
+                    continue
+                sl = floats[off:off + dim]
+                out[name] = sl[0] if dim == 1 else tuple(sl)
+        return out, floats
+
     def materials(self, ptr, n):
         out = []
         s = 44
@@ -239,18 +265,28 @@ class BMDLv2:
             name_ptr = _u32(self.d, o + 0)
             name = _cstr(self.d, self.base + name_ptr) if name_ptr and name_ptr < self.graph_size else None
             name_hash = _u32(self.d, o + 4)
+            flags = _u32(self.d, o + 8)
+            num_params = _i32(self.d, o + 12)
+            params_ptr = _u32(self.d, o + 16)
+            num_floats = _i32(self.d, o + 20)
+            floats_ptr = _u32(self.d, o + 24)
             num_textures = _i32(self.d, o + 28)
             textures_ptr = _u32(self.d, o + 32)
             num_streams = _i32(self.d, o + 36)
             streams_ptr = _u32(self.d, o + 40)
             tex = self.nv_pairs16(textures_ptr, num_textures) if num_textures > 0 and textures_ptr > 0 else []
             streams = self.nv_pairs16(streams_ptr, num_streams) if num_streams > 0 and streams_ptr > 0 else []
+            params, custom_floats = self._mat_params(params_ptr, num_params, floats_ptr, num_floats)
             out.append({
                 "index": i,
                 "name": name,
+                "shader": name,            # the material name IS the shader name
                 "name_hash": name_hash,
+                "flags": flags,
                 "textures": tex,
                 "streams": streams,
+                "params": params,
+                "custom_floats": custom_floats,
             })
         return out
 
