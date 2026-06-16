@@ -1,3 +1,5 @@
+**Master spec (all struct layouts now defined in `bmdl_schema.py`):** [BMDL_FORMAT.md](BMDL_FORMAT.md)
+
 # BMDL — Animation format (reverse engineering)
 
 Reference for the BMDL Importer animation subsystem.

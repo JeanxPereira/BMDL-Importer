@@ -1,3 +1,5 @@
+**Master spec (all struct layouts now defined in `bmdl_schema.py`):** [BMDL_FORMAT.md](BMDL_FORMAT.md)
+
 # BMDL — Materials & Shaders (reverse engineering + importer reference)
 
 This document explains, end to end, how Darkspore's material/shader system works, how we

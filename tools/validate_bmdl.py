@@ -141,10 +141,11 @@ def walk(r, seen, problems):
 
 WALK = walk
 
-def main(root):
+def main(root, report=False):
     files = glob.glob(os.path.join(root, "**", "*.bmdl"), recursive=True)
     ok = bad = 0
     agg = {}
+    zero_mesh_zero_anim = 0
     for f in files:
         problems, seen = validate_file(f)
         for k, v in seen.items():
@@ -155,9 +156,19 @@ def main(root):
                 print(f"FAIL {os.path.relpath(f, root)}: {problems[0]}")
         else:
             ok += 1
+        if seen.get("Mesh", 0) == 0 and seen.get("AnimHeader", 0) == 0:
+            zero_mesh_zero_anim += 1
     print(f"\nfiles={len(files)} ok={ok} fail={bad}")
     print("struct coverage:", {k: agg[k] for k in sorted(agg)})
+    if report:
+        total_structs = sum(agg.values())
+        print(f"\n--- coverage report ---")
+        print(f"total structs parsed : {total_structs}")
+        print(f"files with zero meshes AND zero anims : {zero_mesh_zero_anim}")
     return 0 if bad == 0 else 1
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1] if len(sys.argv) > 1 else "."))
+    args = sys.argv[1:]
+    report_flag = "--report" in args
+    args = [a for a in args if a != "--report"]
+    sys.exit(main(args[0] if args else ".", report=report_flag))
