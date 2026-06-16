@@ -340,14 +340,78 @@ All 12 struct types are exercised. 2 files contain neither meshes nor animations
 
 ## 7. Alternative Formats
 
-The dispatch table in [Section 3](#3-asset-dispatch) covers all asset types loaded by `SP_RenderAsset::LoadAsset @ 004aeea0`. This document covers only **bmdl v2** (hash `0x72047de2`). The other loaders are listed below for reference; detailed struct layouts are reserved for follow-up RE (Task 8).
+The dispatch table in [Section 3](#3-asset-dispatch) covers all asset types loaded by `SP_RenderAsset::LoadAsset @ 004aeea0`. This document covers only **bmdl v2** (hash `0x72047de2`). The remaining loaders are documented below from the decompilation only — **none of these formats appear in the local `.bmdl` corpus** (which is entirely bmdl v2), so every claim here is tagged **[binary-only]** and was *not* measured against real files or validated by the sweep. Field offsets are stated only where they were directly visible in the decompilation; where a structure is too tangled to pin down, that is called out explicitly rather than guessed.
 
-| hash | loader | notes |
-|------|--------|-------|
-| `0xe6bce5` | `LoadGameModelVersioned` / `SP_EditorModel::LoadFromText` | versioned text/binary model (v8/v9 streaming format); detailed layout: see follow-up RE (Task 8) |
-| `0x17952e6c` | `SP_RenderAsset::LoadSkinnedMesh @ 004a4490` | standalone skinned mesh asset; detailed layout: see follow-up RE (Task 8) |
-| `0x2cb4f2f` | `SP_RenderAsset::LoadSkinData @ 004a4850` | skin weight / bind-pose data; detailed layout: see follow-up RE (Task 8) |
-| `0x2f4e681c` | `SP_RenderModel::Load` | render model (non-bmdl path); detailed layout: see follow-up RE (Task 8) |
-| `0x2f7d0004` | `SP_RenderModel::LoadStrided` | strided variant of RenderModel::Load; detailed layout: see follow-up RE (Task 8) |
-| `0x2f4e681b` | `LoadPrefab` | scene prefab / entity collection; detailed layout: see follow-up RE (Task 8) |
-| `0x1c135da` | `ApplyMaterialParams @ 004ac5c0` | material parameter overlay (applies on top of an already-loaded model); detailed layout: see follow-up RE (Task 8) |
+### 7.0 Streaming vs. relocation (the key difference from bmdl v2)
+
+**[binary-only]** bmdl v2 is the only loader that uses the **relocation** model (one graph blob, `BinaryBuffer::Relocate`, graph-relative pointers — see [Section 2](#2-graph-relocation)). Every alternative loader below instead **streams** the file through a `BinaryStream`/`BufferedBinaryReader` (constructed in `LoadAsset` via `BufferedBinaryReader::Construct(0x2000, …)` when the source magic is `0x34722300`). Two primitives recur:
+
+- **raw read** `read(dst, size)` — `FUN_00b0cea0`: calls reader vtbl `+0x30`, returns true iff exactly `size` bytes were delivered. Used for blob payloads (index/vertex/pixel data), which are therefore **little-endian, in file order**.
+- **swapped-dword read** `readDwordSwapped(dst)` — `FUN_00b0cfe0` (and `BinaryStream::ReadDwordsSwapped`): reads a 4-byte dword and **byte-swaps it** (big-endian on disk) unless the reader handle is the sentinel `1`. Used for counts/sizes/flags. So scalar header fields in these formats are stored **big-endian**, unlike bmdl v2's little-endian graph.
+- A bounds guard `FUN_004a3eb0(stream, elemSize, count)` checks `elemSize*count <= bytesRemaining` (reader vtbl `+0x2c`) before every large allocation.
+
+### 7.1 GameModel — `0xe6bce5`, versioned v8/v9 (`SP_RenderAsset::LoadGameModelVersioned @ 004aee10`)
+
+**[binary-only]** This is the only alternative loader that is a genuine **geometry/model** format. Entry `004aee10` reads a 4-byte tag (`read(&hdr,4) == 4`), gates on `version - 8 < 2` (i.e. **v8 or v9 only**), then calls two helpers in sequence: `FUN_004a47b0` (pre-pass) and `FUN_004ae430` (main parse). It streams throughout; there is **no relocation step** and no `bmdl` magic.
+
+`FUN_004a47b0` (pre-pass) reads one swapped count, then loops that many times reading 3 swapped dwords each — a small fixed-stride header table consumed before the body. (Purpose not fully resolved; it is a validation/skip pass that must succeed before parsing continues.)
+
+`FUN_004ae430` (main parse) reads the body strictly in this order (all counts/sizes are swapped dwords; all bulk data are raw reads, each preceded by the `FUN_004a3eb0` bounds guard):
+
+1. a leading count (`local_f0`, reused later as the primitive/draw count), plus an 0x18-byte block and a 4-byte field copied into the output model.
+2. **Index buffers** — `count`, then per buffer: stride, index-count, **index width in bits** (validated to be exactly `0x10` or `0x20`, i.e. 16- or 32-bit indices), and byte-size (validated as `width*count >> 3`); `RenderDevice::CreateIndexBuffer` → lock → raw read → unlock.
+3. **Vertex declarations** — `count`, then per declaration: an element count, `RenderDevice::CreateVertexDeclaration`, then **0x0C bytes per element**, `FinalizeVertexDeclaration`; the finished decl is pushed into a vector at `model+0x88`. (Note the per-element stride here is **12 bytes**, vs. bmdl v2's 8-byte, `0xFF`-terminated declaration — see [Section 5](#5-struct-layouts).)
+4. **Vertex buffers** — `count`, then per buffer: a declaration index (into the `model+0x84..0x88` vector), a vertex count, and a byte size; `RenderDevice::CreateVertexBuffer` → lock → raw read → unlock.
+5. **Primitives/draws** — `local_f0` entries, each pairing a vertex-buffer index and a vertex-declaration index to build a renderable.
+6. **Material name table** — `local_f0 * 4` bytes (one 32-bit material key per primitive) read in a single block, then resolved through `MaterialManager::GetInstance()` (vtbl `+0x4c` load, `+0x2c` bind).
+7. **Material-info records** — `count`, then per record: on **v9 only** (`version > 8`) an extra leading swapped dword is read; a 0x18-byte `"SP_RenderAsset/GameModel/MatInfo"` record is allocated and filled via `FUN_004ac2b0`. This per-record extra dword is the only confirmed v8→v9 layout difference.
+8. **Transform/bone table** — `count` (size-checked as `count*8`), then per entry two swapped dwords.
+9. **Tail** — `FUN_004acd10` (further material/state fixup), then a 0x0C-byte **asset reference** that, when its id field `!= -1`, is used to chain-load a sub-asset of type `0x2f4e681b` (the prefab loader, §7.6) through `AssetCatalog::GetInstance()`.
+
+The exact field offsets *inside* each per-element record (the 0x0C-byte decl elements, the 0x18-byte MatInfo) were not fully decoded and are deliberately **not** tabulated here.
+
+### 7.2 RenderModel — `0x2f4e681c` (`SP_RenderModel::Load @ 004aac40`)
+
+**[binary-only]** Despite the name, this is **not** a mesh loader — it is a **texture/raster** loader. Helper `FUN_004aaa70` reads a 6-dword swapped header (a type/format flag at +0, then width, height, **mip count**, a flags word whose bit `0x1000` selects a **cubemap** (`>>0xc & 1`, giving 6 faces), and a trailing field), then for each mip (×6 if cubemap) reads a swapped size dword followed by that many raw bytes of pixel data. Helper `FUN_004a5450` calls the engine create-texture routine `FUN_007d57b0(width,height,mips,usage,format)` and uploads each mip/face via `FUN_00d17af0`, setting the cube-face index at `tex+0x12`. No geometry, no skeleton.
+
+### 7.3 RenderModel strided — `0x2f7d0004` (`SP_RenderModel::LoadStrided @ 004a46d0`)
+
+**[binary-only]** Also a **texture/raster** loader, not a strided-vertex format. Helper `FUN_004a4580` runs the engine "RasterLoad" path: it opens a raster source, requires a **32-bit (`0x20`) pixel format**, derives the row pitch (`width*0x20` bits → bytes), allocates a `"SP_Graphics/RasterLoad"` buffer, and reads the raster rows. Helper `FUN_008d3a60` then creates a texture (`FUN_007d57b0(width,height,1,8,0x15)` — format `0x15`, single mip) and uploads it. It is effectively the uncompressed/single-surface sibling of §7.2.
+
+### 7.4 SkinnedMesh — `0x17952e6c` (`SP_RenderAsset::LoadSkinnedMesh @ 004a4490`)
+
+**[binary-only]** Again **not** a mesh loader — this is a **DDS texture** loader. Helper `FUN_004a4250` reads a fixed **0x80-byte DDS header**, parses it (`FUN_004907d0`/`FUN_00490900` compute surface dimensions and total payload size), allocates a `"dds buffer"`, and reads the pixel payload. Helper `FUN_004a4330` maps the DDS FourCC/flags to a D3D format (`DXT1`=`0x31545844` … `DXT5`=`0x35545844`, else 32-bit `0x32`/`0x15`), creates the texture, and uploads each mip — with a separate 6-face path when the cubemap flag (`& 0x10`) is set. The result is stored at `model+0x18`.
+
+### 7.5 SkinData — `0x2cb4f2f` (`SP_RenderAsset::LoadSkinData @ 004a4850`)
+
+**[binary-only]** Bind-pose / skinning-matrix table, read entirely with `BinaryStream::ReadDwordsSwapped` (big-endian dwords). On-disk order is fully visible in the decompilation:
+
+1. magic — one swapped dword, must be `0xEEFFEEFF` or `0xFFEEFFEE`;
+2. version — one swapped dword, must equal `2`;
+3. a small enum/flag dword, validated `< 5`;
+4. **bone count** `n` at `model+0x18`, validated `< 0x3D` (61);
+5. a stride dword, validated `== 0x10` (16);
+6. one more dword (with `version == 2` re-checked);
+7. the matrix payload at `model+0x24`: `n * 0x110` bytes read as `(n*0x110)>>2` swapped dwords — i.e. **0x110 (272) bytes per bone**.
+
+It then sets `model+0x1c = DAT_00fd86ac` and `model+0x20 = 1`. The 0x110-byte-per-bone record was not broken down into sub-fields here (it is most likely a transform plus auxiliary skinning data, but that is not confirmed).
+
+### 7.6 Prefab — `0x2f4e681b` (`SP_RenderAsset::LoadPrefab @ 004a5fd0`)
+
+**[binary-only]** A scene/entity **prefab container**, not geometry. `LoadPrefab` delegates to `FUN_004a5d40`, which: queries the source asset for sub-objects of type `0x2f4e681b` and `0x34c84e9` (caching both on the output), reads a fixed **0x98-byte header**, copies an 8×(offset,size) segment table out of it, and then streams **four variable-length segments** (raw reads sized by that table, the first segment's offset/size adjusted by the 0x98 header length) into the prefab object, requiring the running byte cursor to land exactly at end-of-data. `FUN_004a5570` then parses those segments through a separate sub-parser (`FUN_00d08570`/`FUN_00d08290`/`FUN_00d06c30`). The per-segment internal layout lives in that sub-parser and was not decoded; what is confirmed is the dispatch, the 0x98-byte header, and the 4-segment streamed structure.
+
+### 7.7 ApplyMaterialParams — `0x1c135da` (`ApplyMaterialParams @ 004ac5c0`)
+
+**[binary-only]** Not a model format at all — a **material-parameter overlay** that mutates an already-loaded model's materials (its struct layout is the bmdl v2 `Material`/`MatParam`, already documented in [Section 5](#5-struct-layouts)). Listed here only for dispatch completeness.
+
+### Summary
+
+| hash | loader | what it actually loads |
+|------|--------|------------------------|
+| `0xe6bce5` | `LoadGameModelVersioned @ 004aee10` | **geometry/model**, streamed, v8/v9 (the only real alt-model format) |
+| `0x2f4e681c` | `SP_RenderModel::Load @ 004aac40` | **texture** (mip/cubemap raster) — *not* a mesh |
+| `0x2f7d0004` | `SP_RenderModel::LoadStrided @ 004a46d0` | **texture** (32-bit single-surface raster) — *not* strided geometry |
+| `0x17952e6c` | `SP_RenderAsset::LoadSkinnedMesh @ 004a4490` | **DDS texture** — *not* a skinned mesh |
+| `0x2cb4f2f` | `SP_RenderAsset::LoadSkinData @ 004a4850` | **skin/bind-pose matrices** (≤61 bones × 0x110 bytes) |
+| `0x2f4e681b` | `LoadPrefab @ 004a5fd0` | **prefab/entity container** (0x98 header + 4 streamed segments) |
+| `0x1c135da` | `ApplyMaterialParams @ 004ac5c0` | **material-param overlay** on an existing model |
