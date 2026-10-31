@@ -1,0 +1,81 @@
+name: Release
+
+# Push a tag vX.Y.Z whose version matches blender_manifest.toml: the extension is built, validated,
+# attached to a GitHub release, and published as a Blender extensions repository on GitHub Pages
+# (add its index.json URL under Preferences > Get Extensions > Repositories and Blender offers
+# updates by itself).
+
+on:
+  push:
+    tags: ["v*"]
+
+env:
+  BLENDER_VERSION: "5.2.3"
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Tag matches manifest version
+        run: |
+          v=$(sed -n 's/^version = "\(.*\)"\r\{0,1\}$/\1/p' blender_manifest.toml)
+          test "v$v" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME != manifest v$v"; exit 1; }
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+
+      - name: Cache Blender
+        id: blender
+        uses: actions/cache@v6
+        with:
+          path: .blender-bin
+          key: blender-${{ env.BLENDER_VERSION }}-linux-x64
+
+      - name: Download Blender
+        if: steps.blender.outputs.cache-hit != 'true'
+        run: |
+          v="${BLENDER_VERSION%.*}"
+          curl -fsSL "https://download.blender.org/release/Blender${v}/blender-${BLENDER_VERSION}-linux-x64.tar.xz" | tar -xJ
+          mv "blender-${BLENDER_VERSION}-linux-x64" .blender-bin
+
+      - name: Blender runtime libraries
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libxi6 libxkbcommon0 libxxf86vm1 libxfixes3 libxrender1 libgl1 libsm6 libegl1
+
+      - name: Build extension
+        run: .blender-bin/blender --factory-startup --command extension build --output-dir dist
+
+      - name: Validate and enable the extension
+        run: sh tools/ci_blender.sh .blender-bin/blender dist/io_darkspore-*.zip
+
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/io_darkspore-*.zip \
+            --title "BMDL Importer $VERSION" --generate-notes \
+            --notes "Install: Blender 4.5+ > Edit > Preferences > Get Extensions > Install from Disk > io_darkspore-$VERSION.zip. Or add the repository https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}/index.json to get updates inside Blender. Reads .bmdl files unpacked from a Darkspore install; ships no game data."
+
+      - name: Extensions repository
+        run: |
+          mkdir -p site
+          cp dist/io_darkspore-*.zip site/
+          .blender-bin/blender --factory-startup --command extension server-generate --repo-dir=site --html
+
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+      - id: deploy
+        uses: actions/deploy-pages@v5

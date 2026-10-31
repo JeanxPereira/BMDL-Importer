@@ -1,0 +1,42 @@
+name: Import problem
+description: A .bmdl that fails to import, or imports wrong (mesh, rig, material, texture, animation)
+labels: [bug]
+body:
+  - type: input
+    id: file
+    attributes:
+      label: Model
+      description: The .bmdl name and the package it came from (e.g. BMDL_environments.package).
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: What is wrong
+      multiple: true
+      options: [Fails to import, Mesh / UVs / normals, Skeleton / weights, Material, Textures not found, Animation]
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What you see vs. what the game shows
+      description: A screenshot of each helps a lot.
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Blender version and BMDL Importer version (Preferences > Get Extensions).
+      placeholder: Blender 5.1.0, BMDL Importer 0.8.6
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: >
+        Import with Debug Log on and attach the files written next to the .bmdl:
+        <file>.darkspore_import.log.txt, <file>.darkspore_import.missing_textures.log.txt and
+        <file>.darkspore_anim.log.txt (drag them into this box).

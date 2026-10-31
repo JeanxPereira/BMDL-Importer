@@ -5,10 +5,15 @@ name = "Darkspore BMDL Importer"
 tagline = "Import Darkspore BMDL models and animations"
 maintainer = "JeanxPereira & foehammer"
 type = "add-on"
+website = "https://github.com/JeanxPereira/BMDL-Importer"
+tags = ["Import-Export"]
 blender_version_min = "4.5.0"
 license = [
 "SPDX:GPL-3.0-or-later",
 ]
+
+[permissions]
+files = "Read BMDL models and textures, write import logs"
 
 [build]
 paths_exclude_pattern = [

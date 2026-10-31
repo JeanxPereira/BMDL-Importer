@@ -1,0 +1,13 @@
+# Game data never goes to git: .bmdl, textures, unpacked packages, import logs.
+*.bmdl
+*.package
+*.darkspore_import.log.txt
+*.darkspore_import.missing_textures.log.txt
+*.darkspore_anim.log.txt
+# Build and CI output
+dist/
+site/
+.blender-bin/
+__pycache__/
+*.pyc
+*.blend1

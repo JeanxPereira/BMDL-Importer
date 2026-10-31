@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The manifest's minimum (4.5 LTS) and the newest release.
+        blender: ["4.5.15", "5.2.3"]
+    name: Blender ${{ matrix.blender }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Compile (bmdl_schema must stay importable outside Blender)
+        run: |
+          python -m compileall -q -x '/\.blender-bin/' .
+          python -c "import bmdl_schema"
+
+      - name: Cache Blender
+        id: blender
+        uses: actions/cache@v6
+        with:
+          path: .blender-bin
+          key: blender-${{ matrix.blender }}-linux-x64
+
+      - name: Download Blender
+        if: steps.blender.outputs.cache-hit != 'true'
+        env:
+          BLENDER_VERSION: ${{ matrix.blender }}
+        run: |
+          v="${BLENDER_VERSION%.*}"
+          curl -fsSL "https://download.blender.org/release/Blender${v}/blender-${BLENDER_VERSION}-linux-x64.tar.xz" | tar -xJ
+          mv "blender-${BLENDER_VERSION}-linux-x64" .blender-bin
+
+      - name: Blender runtime libraries
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libxi6 libxkbcommon0 libxxf86vm1 libxfixes3 libxrender1 libgl1 libsm6 libegl1
+
+      - name: Build extension
+        run: .blender-bin/blender --factory-startup --command extension build --output-dir dist
+
+      - name: Validate and enable the extension
+        run: sh tools/ci_blender.sh .blender-bin/blender dist/io_darkspore-*.zip
+
+      - uses: actions/upload-artifact@v7
+        if: matrix.blender == '5.2.3'
+        with:
+          name: extension
+          path: dist/*.zip

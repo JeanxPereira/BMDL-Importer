@@ -6,6 +6,8 @@
 ![python](https://img.shields.io/badge/Python-3.11%2B-14151b?style=flat-square)
 ![format](https://img.shields.io/badge/format-.bmdl-7884a8?style=flat-square)
 ![license](https://img.shields.io/badge/license-GPL--3.0-14151b?style=flat-square)
+[![ci](https://img.shields.io/github/actions/workflow/status/JeanxPereira/BMDL-Importer/ci.yml?branch=main&label=CI&style=flat-square&color=14151b)](https://github.com/JeanxPereira/BMDL-Importer/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/JeanxPereira/BMDL-Importer?style=flat-square&color=5068a8)](https://github.com/JeanxPereira/BMDL-Importer/releases)
 [![issues](https://img.shields.io/github/issues/JeanxPereira/BMDL-Importer?style=flat-square&color=54a89c)](https://github.com/JeanxPereira/BMDL-Importer/issues)
 
 </div>
@@ -40,21 +42,43 @@ The game keeps its models inside DBPF packages; unpack them with
 
 ## <img src="docs/img/h-requirements.svg" alt="Requirements" width="100%">
 
-- Blender 4.4 or newer (tested on 5.1). The new slotted Action system is used, with a fallback
-  for legacy actions.
+- Blender 4.5 or newer (tested on 5.1; CI installs and enables it on 4.5 LTS and 5.2). The new
+  slotted Action system is used, with a fallback for legacy actions.
 - License: GPL-3.0-or-later.
 - Authors: JeanxPereira, foehammer.
 
 ## <img src="docs/img/h-install.svg" alt="Installation" width="100%">
 
-1. Clone or download this repository.
-2. Zip the add-on folder so the archive root contains `__init__.py` and the other modules.
-3. In Blender: Edit > Preferences > Add-ons > Install, and select the zip.
-4. Enable "Darkspore BMDL Importer".
-5. Import via File > Import > Darkspore (.bmdl).
+**From Blender, with updates** (recommended): Edit > Preferences > Get Extensions >
+Repositories > **+** > *Add Remote Repository*, and paste
 
-Developer install: copy or symlink the add-on folder into your Blender
-`scripts/addons` (or `scripts/addons_core`) directory.
+```
+https://jeanxpereira.github.io/BMDL-Importer/index.json
+```
+
+Then search for *Darkspore BMDL Importer* in Get Extensions and install it. Blender offers every
+new release as an update.
+
+**From a zip**: download `io_darkspore-<version>.zip` from
+[Releases](https://github.com/JeanxPereira/BMDL-Importer/releases), then Edit > Preferences >
+Get Extensions > ⌄ > *Install from Disk*.
+
+Either way the importer is at File > Import > Darkspore (.bmdl).
+
+**From source**: the repository root is the extension (`blender_manifest.toml` next to
+`__init__.py`).
+
+```sh
+blender --command extension build --output-dir dist     # dist/io_darkspore-<version>.zip
+sh tools/ci_blender.sh blender dist/io_darkspore-*.zip  # the CI check: validate, install, enable
+```
+
+For development, link the clone into your extensions folder as `user_default/io_darkspore`
+and reload scripts after each change.
+
+**Releasing**: bump `version` in `blender_manifest.toml`, push a tag `vX.Y.Z`; the release
+workflow builds and validates the extension, attaches the zip to a GitHub release and republishes
+the extensions repository on GitHub Pages.
 
 ## <img src="docs/img/h-use.svg" alt="Usage" width="100%">
 
@@ -140,16 +164,25 @@ Each import writes sidecar logs next to the source file:
 
 ## <img src="docs/img/h-layout.svg" alt="Project layout" width="100%">
 
-- `bmdl_core.py` — binary parsing: header/graph, model, skeleton, meshes, materials, animation decode.
-- `io_mesh.py` — mesh build (geometry, UVs, vertex colours, normals).
-- `io_material.py` — data-driven material builder (all labs shader families) and texture search.
-- `io_armature.py` — armature creation, bind-pose transforms, skinning.
-- `io_anim.py` — closed-form animation bake.
-- `utils.py` — axis-matrix helper and Darkspore FNV-1 hash.
-- `tools/readme_art.py` — this README's art: banner and headers set in Darkspore's own UI fonts
-  (EA Pirulen, Helvetica Neue Condensed Bold) in the look of its front-end frames, regenerated
-  from the game's `UI.package` with `python tools/readme_art.py <Darkspore/Data>` (Pillow,
-  fontTools). Only the SVGs are kept; nothing from the game is stored.
+| What | Where |
+|---|---|
+| Binary parsing: header/graph, model, skeleton, meshes, materials, animation decode | `bmdl_core.py` |
+| Standalone schema of the format (no Blender needed) | `bmdl_schema.py` |
+| Operator, options, import flow | `__init__.py` |
+| Mesh build: geometry, UVs, vertex colours, normals | `io_mesh.py` |
+| Data-driven material builder (all labs shader families), texture search | `io_material.py` |
+| Armature, bind-pose transforms, skinning | `io_armature.py` |
+| Closed-form animation bake | `io_anim.py` |
+| Axis-matrix helper, Darkspore FNV-1 hash | `utils.py` |
+| Format reference | [BMDL_FORMAT](docs/BMDL_FORMAT.md), [BMDL_MATERIALS](docs/BMDL_MATERIALS.md), [BMDL_ANIMATION](docs/BMDL_ANIMATION.md) |
+| Corpus validator: `python tools/validate_bmdl.py <dir of .bmdl>` | `tools/validate_bmdl.py` |
+| CI check of a built extension | `tools/ci_blender.sh`, `.github/workflows/` |
+| This README's art | `tools/readme_art.py` |
+
+The banner and headers are set in Darkspore's own UI fonts (EA Pirulen, Helvetica Neue Condensed
+Bold) in the look of its front-end frames, regenerated from the game's `UI.package` with
+`python tools/readme_art.py <Darkspore/Data>` (Pillow, fontTools). Only the SVGs are kept;
+nothing from the game is stored.
 
 ## <img src="docs/img/h-credits.svg" alt="Credits" width="100%">
 
