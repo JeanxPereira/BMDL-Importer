@@ -47,7 +47,12 @@ jobs:
         if: steps.blender.outputs.cache-hit != 'true'
         run: |
           v="${BLENDER_VERSION%.*}"
-          curl -fsSL "https://download.blender.org/release/Blender${v}/blender-${BLENDER_VERSION}-linux-x64.tar.xz" | tar -xJ
+          f="Blender${v}/blender-${BLENDER_VERSION}-linux-x64.tar.xz"
+          # download.blender.org answers 403 to CI runners now and then: retry, then mirrors.
+          for m in https://download.blender.org/release https://mirrors.ocf.berkeley.edu/blender/release https://ftp.nluug.nl/pub/graphics/blender/release; do
+            curl -fsSL --retry 3 --retry-delay 5 -o blender.tar.xz "$m/$f" && break
+          done
+          tar -xJf blender.tar.xz && rm blender.tar.xz
           mv "blender-${BLENDER_VERSION}-linux-x64" .blender-bin
 
       - name: Blender runtime libraries
