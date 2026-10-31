@@ -54,7 +54,7 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq libxi6 libxkbcommon0 libxxf86vm1 libxfixes3 libxrender1 libgl1 libsm6 libegl1
 
       - name: Build extension
-        run: .blender-bin/blender --factory-startup --command extension build --output-dir dist
+        run: mkdir -p dist && .blender-bin/blender --factory-startup --command extension build --output-dir dist
 
       - name: Validate and enable the extension
         run: sh tools/ci_blender.sh .blender-bin/blender dist/io_darkspore-*.zip

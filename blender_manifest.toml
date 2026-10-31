@@ -23,5 +23,7 @@ paths_exclude_pattern = [
 "/docs/",
 "/tools/",
 "/dist/",
+"/site/",
+"/.blender-bin/",
 "*.afdesign",
 ]

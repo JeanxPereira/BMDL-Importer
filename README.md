@@ -69,7 +69,7 @@ Either way the importer is at File > Import > Darkspore (.bmdl).
 `__init__.py`).
 
 ```sh
-blender --command extension build --output-dir dist     # dist/io_darkspore-<version>.zip
+mkdir -p dist && blender --command extension build --output-dir dist   # dist/io_darkspore-<version>.zip
 sh tools/ci_blender.sh blender dist/io_darkspore-*.zip  # the CI check: validate, install, enable
 ```
 
