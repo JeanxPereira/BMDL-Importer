@@ -29,7 +29,7 @@ body:
     attributes:
       label: Versions
       description: Blender version and BMDL Importer version (Preferences > Get Extensions).
-      placeholder: Blender 5.1.0, BMDL Importer 0.8.6
+      placeholder: Blender 5.1.0, BMDL Importer 1.1.0
     validations:
       required: true
   - type: textarea

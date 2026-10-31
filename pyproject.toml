@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "io-darkspore-bmdl"
-version = "0.8.6"
+version = "1.1.0"
 description = "Blender add-on: Import Darkspore .bmdl"
 authors = [
 { name = "JeanxPereira" },
