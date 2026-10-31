@@ -1,11 +1,16 @@
 <div align="center">
-  <img src="res/icon.png" alt="Darkspore BMDL Importer" width="256" />
+
+<img src="docs/img/banner.svg" alt="BMDL Importer: Darkspore models, skeletons, materials and animations, into Blender" width="100%">
+
+![blender](https://img.shields.io/badge/Blender-4.5%2B%20%C2%B7%20tested%205.1-5068a8?style=flat-square)
+![python](https://img.shields.io/badge/Python-3.11%2B-14151b?style=flat-square)
+![format](https://img.shields.io/badge/format-.bmdl-7884a8?style=flat-square)
+![license](https://img.shields.io/badge/license-GPL--3.0-14151b?style=flat-square)
+[![issues](https://img.shields.io/github/issues/JeanxPereira/BMDL-Importer?style=flat-square&color=54a89c)](https://github.com/JeanxPereira/BMDL-Importer/issues)
+
 </div>
 
-<h1 align="center">Darkspore BMDL Importer</h1>
-<p align="center">Blender add-on to import Darkspore <code>.bmdl</code> models, materials, skinning, and embedded animations.</p>
-
-## Overview
+## <img src="docs/img/h-overview.svg" alt="Overview" width="100%">
 
 `.bmdl` is Darkspore's model container: a relocatable graph holding the geometry, the
 skeleton, the materials, and the embedded animations. This add-on parses that container and
@@ -15,7 +20,13 @@ The material and animation behaviour is reconstructed from the game's actual dat
 math (recovered by reverse engineering), not approximated. See the documents under `docs/` for
 the full format and the reasoning behind every field.
 
-## Features
+<p align="center"><img src="docs/img/pipeline.svg" alt="Data/*.package → DBPF-Unpacker → BMDL Importer → Blender" width="100%"></p>
+
+The game keeps its models inside DBPF packages; unpack them with
+[DBPF-Unpacker](https://github.com/JeanxPereira/dbpf_unpacker) and point the importer at the loose
+`.bmdl` files.
+
+## <img src="docs/img/h-features.svg" alt="Features" width="100%">
 
 - Imports `.bmdl` meshes, auto-detecting index size and triangle layout.
 - Builds an armature from the file's skeleton and binds meshes with vertex weights.
@@ -27,14 +38,14 @@ the full format and the reasoning behind every field.
 - Resolves textures by filename and by Darkspore FNV-1 hash, with a bounded folder search.
 - Writes detailed per-mesh, texture, and animation logs next to the imported file.
 
-## Requirements
+## <img src="docs/img/h-requirements.svg" alt="Requirements" width="100%">
 
 - Blender 4.4 or newer (tested on 5.1). The new slotted Action system is used, with a fallback
   for legacy actions.
 - License: GPL-3.0-or-later.
 - Authors: JeanxPereira, foehammer.
 
-## Installation
+## <img src="docs/img/h-install.svg" alt="Installation" width="100%">
 
 1. Clone or download this repository.
 2. Zip the add-on folder so the archive root contains `__init__.py` and the other modules.
@@ -45,7 +56,7 @@ the full format and the reasoning behind every field.
 Developer install: copy or symlink the add-on folder into your Blender
 `scripts/addons` (or `scripts/addons_core`) directory.
 
-## Usage
+## <img src="docs/img/h-use.svg" alt="Usage" width="100%">
 
 ### From the UI
 
@@ -72,7 +83,7 @@ bpy.ops.import_scene.io_darkspore(
 )
 ```
 
-## Importer options
+## <img src="docs/img/h-options.svg" alt="Importer options" width="100%">
 
 - Import Textures: resolve and link textures (by name or FNV-1 hash). With Use Custom Texture
   Path, search a chosen directory; otherwise search candidate folders near the `.bmdl`.
@@ -84,7 +95,7 @@ bpy.ops.import_scene.io_darkspore(
 - Axis Forward / Axis Up / Apply Axis to Vertices: orientation conversion for geometry and animation.
 - Debug Log / Dry Run: diagnostics; Dry Run scores index modes without building meshes.
 
-## Materials
+## <img src="docs/img/h-materials.svg" alt="Materials" width="100%">
 
 Each material names a shader (for example `labsChromeVertColor`) plus a packed parameter block
 and a set of texture and vertex-stream bindings. The importer reads those parameters and builds
@@ -103,14 +114,14 @@ a node graph per shader family:
 The full format, the 33-shader catalog with exact per-shader math, and the known limitations are
 documented in [docs/BMDL_MATERIALS.md](docs/BMDL_MATERIALS.md).
 
-## Animations
+## <img src="docs/img/h-animations.svg" alt="Animations" width="100%">
 
 Animation tracks store parent-relative local transforms (translation / quaternion rotation /
 scale) per bone, sampled at keyframe times. The importer composes these up the bone hierarchy
 and bakes the result onto the armature's pose bones. The format and the bake math are documented
 in [docs/BMDL_ANIMATION.md](docs/BMDL_ANIMATION.md).
 
-## Logs
+## <img src="docs/img/h-logs.svg" alt="Logs" width="100%">
 
 Each import writes sidecar logs next to the source file:
 
@@ -118,7 +129,7 @@ Each import writes sidecar logs next to the source file:
 - `<file>.darkspore_import.missing_textures.log.txt` — which hints/hashes were searched and resolved.
 - `<file>.darkspore_anim.log.txt` — animation parsing summary.
 
-## Known limitations
+## <img src="docs/img/h-limits.svg" alt="Known limitations" width="100%">
 
 - Darkspore is a deferred renderer; Blender's forward shading approximates the lit term using
   scene lights.
@@ -127,7 +138,7 @@ Each import writes sidecar logs next to the source file:
 - Terrain SubMix decal layers blend softly through the deferred decal pass; imported as separate
   opaque meshes they show hard polygon edges. The geometry and textures are faithful.
 
-## Project layout
+## <img src="docs/img/h-layout.svg" alt="Project layout" width="100%">
 
 - `bmdl_core.py` — binary parsing: header/graph, model, skeleton, meshes, materials, animation decode.
 - `io_mesh.py` — mesh build (geometry, UVs, vertex colours, normals).
@@ -135,8 +146,12 @@ Each import writes sidecar logs next to the source file:
 - `io_armature.py` — armature creation, bind-pose transforms, skinning.
 - `io_anim.py` — closed-form animation bake.
 - `utils.py` — axis-matrix helper and Darkspore FNV-1 hash.
+- `tools/readme_art.py` — this README's art: banner and headers set in Darkspore's own UI fonts
+  (EA Pirulen, Helvetica Neue Condensed Bold) in the look of its front-end frames, regenerated
+  from the game's `UI.package` with `python tools/readme_art.py <Darkspore/Data>` (Pillow,
+  fontTools). Only the SVGs are kept; nothing from the game is stored.
 
-## Credits
+## <img src="docs/img/h-credits.svg" alt="Credits" width="100%">
 
 - foehammer — specs and prior research into Darkspore formats.
 - Community research on Darkspore/Spore file structures and hashing.
@@ -145,3 +160,5 @@ Each import writes sidecar logs next to the source file:
 
 Menu path: File > Import > Darkspore (.bmdl)
 Issue tracker: https://github.com/JeanxPereira/BMDL-Importer/issues/
+
+<div align="center"><sub>Darkspore, its lettering and its wordmark belong to Electronic Arts / Maxis; this is a fan project and ships no game data</sub></div>

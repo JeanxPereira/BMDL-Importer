@@ -9,3 +9,14 @@ blender_version_min = "4.5.0"
 license = [
 "SPDX:GPL-3.0-or-later",
 ]
+
+[build]
+paths_exclude_pattern = [
+"__pycache__/",
+"/.git/",
+"/.claude/",
+"/docs/",
+"/tools/",
+"/dist/",
+"*.afdesign",
+]
